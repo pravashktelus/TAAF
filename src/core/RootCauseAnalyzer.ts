@@ -1,0 +1,281 @@
+import { Page } from '@playwright/test';
+import * as fs from 'fs';
+import * as path from 'path';
+import { Logger } from '../utils/Logger';
+import { OpenAIClient } from '../utils/OpenAIClient';
+
+// Context object describing a test failure for root cause analysis.
+export interface TestFailureContext {
+  scenarioName: string;
+  failureMessage: string;
+  errorStack?: string;
+  lastActions: string[];
+  pageUrl: string;
+  pageTitle: string;
+  elements?: { selector: string; error: string }[];
+  apiResponses?: { endpoint: string; status: number; error?: string }[];
+  screenshot?: string;
+}
+
+/**
+ * Analyzes test failures using OpenAI to determine root causes and suggest fixes.
+ */
+export class RootCauseAnalyzer {
+  private page: Page;
+  private actionHistory: string[] = [];
+  private failureReportDir: string;
+  private maxHistorySize: number = 20;
+
+  constructor(page: Page) {
+    this.page = page;
+    this.failureReportDir = 'reports/failure-analysis';
+    this._ensureReportDir();
+  }
+
+  recordAction(action: string): void {
+    this.actionHistory.push(`${new Date().toISOString()}: ${action}`);
+    if (this.actionHistory.length > this.maxHistorySize) {
+      this.actionHistory.shift();
+    }
+  }
+
+  async analyzeFailure(
+    context: TestFailureContext
+  ): Promise<{ analysis: string; suggestions: string[]; report: string }> {
+    try {
+      Logger.info(`Analyzing failure: ${context.scenarioName}`);
+
+      const pageState = await this._capturePageState();
+
+      const enhancedContext = {
+        ...context,
+        pageState,
+        actionHistory: this.actionHistory,
+      };
+
+      const analysis = await OpenAIClient.analyzeFailure(
+        context.failureMessage,
+        context.lastActions,
+        context.screenshot
+      );
+
+      const suggestions = await this._generateSuggestions(enhancedContext, analysis);
+
+      const report = await this._generateReport(
+        context,
+        analysis,
+        suggestions
+      );
+
+      Logger.info(`Failure analysis complete. Report: ${report}`);
+
+      return { analysis, suggestions, report };
+    } catch (error) {
+      Logger.error(`Failure analysis error: ${error}`);
+      return {
+        analysis: 'Analysis unavailable',
+        suggestions: ['Check test logs for details'],
+        report: 'report_error.txt',
+      };
+    }
+  }
+
+  private async _generateSuggestions(
+    context: any,
+    analysis: string
+  ): Promise<string[]> {
+    const suggestions: string[] = [];
+
+    const failureMsg = context.failureMessage.toLowerCase();
+
+    if (
+      failureMsg.includes('timeout') ||
+      failureMsg.includes('waiting')
+    ) {
+      suggestions.push('Increase wait timeout or add explicit waits');
+      suggestions.push('Check if element is dynamically loaded');
+    }
+
+    if (failureMsg.includes('not found') || failureMsg.includes('null')) {
+      suggestions.push('Verify element locator is still valid');
+      suggestions.push('Check if page layout changed');
+      suggestions.push('Use self-healing to find alternative locator');
+    }
+
+    if (failureMsg.includes('navigation')) {
+      suggestions.push('Check URL routing and redirects');
+      suggestions.push('Verify network connectivity');
+      suggestions.push('Check for unexpected pop-ups or modals');
+    }
+
+    if (failureMsg.includes('assertion') || failureMsg.includes('expect')) {
+      suggestions.push('Review expected vs actual values');
+      suggestions.push('Check data consistency');
+      suggestions.push('Verify test data is correct');
+    }
+
+    if (failureMsg.includes('401') || failureMsg.includes('403')) {
+      suggestions.push('Check authentication tokens');
+      suggestions.push('Verify user permissions');
+      suggestions.push('Check if session expired');
+    }
+
+    if (analysis && analysis.length > 0) {
+      suggestions.push(analysis.split('\n')[0]);
+    }
+
+    return [...new Set(suggestions)];
+  }
+
+  private async _generateReport(
+    context: TestFailureContext,
+    analysis: string,
+    suggestions: string[]
+  ): Promise<string> {
+    const timestamp = new Date().toISOString();
+    const reportName = `failure_${Date.now()}.md`;
+    const reportPath = path.join(this.failureReportDir, reportName);
+
+    const report = `# Test Failure Report
+Generated: ${timestamp}
+
+## Scenario
+${context.scenarioName}
+
+## Failure Message
+\`\`\`
+${context.failureMessage}
+\`\`\`
+
+${context.errorStack ? `## Stack Trace
+\`\`\`
+${context.errorStack}
+\`\`\`
+
+` : ''}## Page Context
+- **URL**: ${context.pageUrl}
+- **Title**: ${context.pageTitle}
+
+## Recent Actions
+${context.lastActions.map((a, i) => `${i + 1}. ${a}`).join('\n')}
+
+## Root Cause Analysis
+${analysis}
+
+## Suggested Fixes
+${suggestions.map((s, i) => `${i + 1}. ${s}`).join('\n')}
+
+${context.elements && context.elements.length > 0 ? `
+## Element Issues
+${context.elements.map((e) => `- **${e.selector}**: ${e.error}`).join('\n')}
+` : ''}${context.apiResponses && context.apiResponses.length > 0 ? `
+## API Response Issues
+${context.apiResponses
+  .map(
+    (r) => `- **${r.endpoint}**: Status ${r.status}${r.error ? ` - ${r.error}` : ''}`
+  )
+  .join('\n')}
+` : ''}## Additional Debugging Steps
+1. Review the screenshot capture for visual context
+2. Check console logs for JavaScript errors
+3. Verify network requests in browser DevTools
+4. Run the scenario in isolation to confirm issue
+5. Check recent code changes that might affect this test
+
+---
+*Report generated by RootCauseAnalyzer*`;
+
+    fs.writeFileSync(reportPath, report);
+    Logger.info(`Failure report generated: ${reportName}`);
+    return reportName;
+  }
+
+  private async _capturePageState(): Promise<string> {
+    try {
+      const title = await this.page.title();
+      const url = this.page.url();
+      const elementCount = await this.page.locator('*').count();
+
+      const logs: string[] = [];
+      this.page.on('console', (msg) => {
+        logs.push(`[${msg.type()}] ${msg.text()}`);
+      });
+
+      return `Title: ${title}\nURL: ${url}\nElements: ${elementCount}\nLogs: ${logs.join('; ') || 'None'}`;
+    } catch (error) {
+      return 'Unable to capture page state';
+    }
+  }
+
+  async analyzeAPIFailure(
+    endpoint: string,
+    statusCode: number,
+    response: any,
+    expectedBehavior: string
+  ): Promise<string> {
+    try {
+      const failureContext: TestFailureContext = {
+        scenarioName: 'API Test',
+        failureMessage: `API call to ${endpoint} returned ${statusCode}`,
+        lastActions: [
+          `POST/GET ${endpoint}`,
+          `Status Code: ${statusCode}`,
+          `Response: ${JSON.stringify(response).substring(0, 200)}`,
+        ],
+        pageUrl: endpoint,
+        pageTitle: `API - ${statusCode}`,
+        apiResponses: [
+          {
+            endpoint,
+            status: statusCode,
+            error: JSON.stringify(response),
+          },
+        ],
+      };
+
+      const { analysis, suggestions } = await this.analyzeFailure(
+        failureContext
+      );
+      return `${analysis}\n\nSuggestions: ${suggestions.join(', ')}`;
+    } catch (error) {
+      Logger.error(`API failure analysis error: ${error}`);
+      return 'API analysis failed';
+    }
+  }
+
+  getCommonPatterns(): { pattern: string; count: number }[] {
+    const reports = fs.readdirSync(this.failureReportDir);
+    const patterns: Map<string, number> = new Map();
+
+    reports.forEach((file) => {
+      try {
+        const content = fs.readFileSync(
+          path.join(this.failureReportDir, file),
+          'utf-8'
+        );
+        const lines = content.split('\n');
+        const failureMsg = lines.find((l) => l.includes('Failure Message'));
+        if (failureMsg) {
+          const pattern = failureMsg.substring(0, 50);
+          patterns.set(pattern, (patterns.get(pattern) || 0) + 1);
+        }
+      } catch {
+      }
+    });
+
+    return Array.from(patterns)
+      .map(([pattern, count]) => ({ pattern, count }))
+      .sort((a, b) => b.count - a.count);
+  }
+
+  clearHistory(): void {
+    this.actionHistory = [];
+    Logger.debug('Action history cleared');
+  }
+
+  private _ensureReportDir(): void {
+    if (!fs.existsSync(this.failureReportDir)) {
+      fs.mkdirSync(this.failureReportDir, { recursive: true });
+    }
+  }
+}

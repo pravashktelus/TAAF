@@ -1,0 +1,7 @@
+{
+  "allure": {
+    "resultsDir": "reports/allure-results",
+    "reportDir": "reports/allure-report",
+    "baseUrl": "http://localhost:4040"
+  }
+}

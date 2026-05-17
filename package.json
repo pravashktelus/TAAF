@@ -1,0 +1,39 @@
+{
+  "name": "playwright-bdd-framework",
+  "version": "1.0.0",
+  "description": "Playwright TypeScript BDD Framework for Web & API Automation",
+  "scripts": {
+    "test": "cucumber-js",
+    "test:web": "cucumber-js --tags @web",
+    "test:api": "cucumber-js --tags @api",
+    "test:smoke": "cucumber-js --tags @smoke",
+    "test:regression": "cucumber-js --tags @regression",
+    "clean:allure": "rm -rf reports/allure-results reports/allure-report",
+    "convert:allure": "npm run clean:allure && node src/utils/GenerateAllureResults.js",
+    "report": "node src/utils/GenerateReport.js",
+    "report:allure": "npm run convert:allure && allure generate reports/allure-results --clean -o reports/allure-report",
+    "open:allure": "npm run report:allure && allure open reports/allure-report",
+    "clean": "rm -rf reports test-results"
+  },
+  "dependencies": {
+    "@apidevtools/json-schema-ref-parser": "^11.7.3",
+    "@cucumber/cucumber": "^10.3.2",
+    "@playwright/test": "^1.43.1",
+    "ajv": "^8.16.0",
+    "allure-cucumberjs": "^2.13.0",
+    "allure-js-commons": "^2.13.0",
+    "axios": "^1.7.2",
+    "dotenv": "^16.4.5",
+    "multiple-cucumber-html-reporter": "^3.7.0",
+    "openai": "^4.52.0",
+    "sharp": "^0.33.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.4.5",
+    "winston": "^3.13.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.12.12",
+    "fast-check": "^4.8.0",
+    "vitest": "^4.1.6"
+  }
+}

@@ -1,0 +1,44 @@
+# Dependencies
+node_modules/
+
+# Environment secrets
+.env
+
+# Build output
+dist/
+
+# Reports (generated at runtime)
+reports/
+test-results/
+
+# Screenshots & videos (generated at runtime)
+*.png
+*.mp4
+*.webm
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# TypeScript
+*.js.map
+*.d.ts
+
+# Logs
+*.log
+logs/
+
+# Kiro AI internal (not for source control)
+.kiro/
+
+# Test baselines (optional - uncomment if you want to track baselines)
+# test-baselines/
+
+# Allure
+.allure/
+
+# OS files
+Thumbs.db

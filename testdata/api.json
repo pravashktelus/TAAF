@@ -1,0 +1,14 @@
+{
+  "createUser": {
+    "name": "QA Tester",
+    "job": "Automation Engineer"
+  },
+  "updateUser": {
+    "name": "Updated User",
+    "job": "Senior QA"
+  },
+  "loginCredentials": {
+    "email": "eve.holt@reqres.in",
+    "password": "cityslicka"
+  }
+}

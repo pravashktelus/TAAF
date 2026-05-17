@@ -1,0 +1,10 @@
+{
+  "qa": {
+    "baseUrl": "https://www.saucedemo.com",
+    "apiBaseUrl": "https://reqres.in",
+    "timeout": 30000,
+    "navigationTimeout": 60000,
+    "apiTimeout": 15000,
+    "retryCount": 2
+  }
+}

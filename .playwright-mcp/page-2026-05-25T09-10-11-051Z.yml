@@ -1,0 +1,63 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - generic [ref=e3]:
+      - generic [ref=e9]:
+        - img [ref=e11]
+        - generic [ref=e15]:
+          - heading "TeleConnect" [level=1] [ref=e16]
+          - paragraph [ref=e17]: Broadband Services
+      - generic [ref=e18]:
+        - heading "High-Speed Broadband at Your Doorstep" [level=2] [ref=e19]:
+          - text: High-Speed Broadband
+          - text: at Your Doorstep
+        - paragraph [ref=e20]: Order, track, and manage your broadband connection seamlessly. From application to activation — all in one place.
+        - generic [ref=e21]:
+          - generic [ref=e22]:
+            - img [ref=e24]
+            - generic [ref=e26]: Up to 1 Gbps
+          - generic [ref=e27]:
+            - img [ref=e29]
+            - generic [ref=e31]: Unlimited Data
+          - generic [ref=e32]:
+            - img [ref=e34]
+            - generic [ref=e36]: OTT Included
+          - generic [ref=e37]:
+            - img [ref=e39]
+            - generic [ref=e41]: 24/7 Support
+      - paragraph [ref=e43]: © 2024 TeleConnect. All rights reserved.
+    - generic [ref=e45]:
+      - generic [ref=e46]:
+        - generic [ref=e47]:
+          - generic [ref=e48]: Welcome Back
+          - generic [ref=e49]: Sign in to your account
+        - generic [ref=e51]:
+          - generic [ref=e52]:
+            - generic [ref=e53]: Email
+            - textbox "Email" [ref=e54]:
+              - /placeholder: Enter your email
+          - generic [ref=e55]:
+            - generic [ref=e56]: Password
+            - textbox "Password" [ref=e57]:
+              - /placeholder: Enter your password
+          - button "Sign In" [ref=e58]
+          - paragraph [ref=e59]:
+            - text: New customer?
+            - button "Create an account" [ref=e60]
+      - generic [ref=e61]:
+        - generic [ref=e64]: Internal Apps
+        - generic [ref=e66]:
+          - button "CRM crm123" [ref=e67]:
+            - img [ref=e69]
+            - paragraph [ref=e74]: CRM
+            - generic [ref=e75]: crm123
+          - button "Install install123" [ref=e76]:
+            - img [ref=e78]
+            - paragraph [ref=e80]: Install
+            - generic [ref=e81]: install123
+          - button "Activate activation123" [ref=e82]:
+            - img [ref=e84]
+            - paragraph [ref=e86]: Activate
+            - generic [ref=e87]: activation123
+  - region "Notifications alt+T"
+  - button "Open Next.js Dev Tools" [ref=e93] [cursor=pointer]:
+    - img [ref=e94]

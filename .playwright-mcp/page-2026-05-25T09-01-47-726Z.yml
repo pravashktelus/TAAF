@@ -1,0 +1,82 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e106]:
+    - banner [ref=e107]:
+      - generic [ref=e108]:
+        - link "TeleConnect" [ref=e109] [cursor=pointer]:
+          - /url: /customer
+          - img [ref=e111]
+          - generic [ref=e115]: TeleConnect
+        - navigation [ref=e116]:
+          - link "Dashboard" [ref=e117] [cursor=pointer]:
+            - /url: /customer
+          - link "My Orders" [ref=e118] [cursor=pointer]:
+            - /url: /customer/orders
+          - link "New Order" [ref=e119] [cursor=pointer]:
+            - /url: /customer/order
+        - generic [ref=e120]:
+          - generic [ref=e121]:
+            - generic [ref=e123]: P
+            - generic [ref=e124]: Prem Kumar
+          - button "Logout" [ref=e125]:
+            - img [ref=e126]
+            - text: Logout
+    - main [ref=e129]:
+      - generic [ref=e131]:
+        - generic [ref=e136]:
+          - generic [ref=e137]:
+            - paragraph [ref=e138]: Welcome back
+            - heading "Prem Kumar" [level=1] [ref=e139]
+            - paragraph [ref=e140]: Manage your broadband connections, track orders, and get high-speed internet at your doorstep.
+          - link "New Connection" [ref=e141] [cursor=pointer]:
+            - /url: /customer/order
+            - button "New Connection" [ref=e142]:
+              - img
+              - text: New Connection
+        - generic [ref=e143]:
+          - generic [ref=e145]:
+            - img [ref=e147]
+            - generic [ref=e149]:
+              - paragraph [ref=e150]: "0"
+              - paragraph [ref=e151]: Total Orders
+          - generic [ref=e153]:
+            - img [ref=e155]
+            - generic [ref=e158]:
+              - paragraph [ref=e159]: "0"
+              - paragraph [ref=e160]: In Progress
+          - generic [ref=e162]:
+            - img [ref=e164]
+            - generic [ref=e167]:
+              - paragraph [ref=e168]: "0"
+              - paragraph [ref=e169]: Activated
+        - generic [ref=e170]:
+          - heading "Recent Orders" [level=2] [ref=e172]
+          - generic [ref=e174]:
+            - img [ref=e176]
+            - heading "Get Connected" [level=3] [ref=e180]
+            - paragraph [ref=e181]: Order your high-speed broadband connection in just a few steps. Choose from our range of plans.
+            - link "Place your first order" [ref=e182] [cursor=pointer]:
+              - /url: /customer/order
+              - button "Place your first order" [ref=e183]
+        - generic [ref=e184]:
+          - link "New Broadband Connection Order a new connection in 5 easy steps" [ref=e185] [cursor=pointer]:
+            - /url: /customer/order
+            - generic [ref=e187]:
+              - img [ref=e189]
+              - generic [ref=e190]:
+                - heading "New Broadband Connection" [level=3] [ref=e191]
+                - paragraph [ref=e192]: Order a new connection in 5 easy steps
+          - link "Track My Orders View status and details of all orders" [ref=e193] [cursor=pointer]:
+            - /url: /customer/orders
+            - generic [ref=e195]:
+              - img [ref=e197]
+              - generic [ref=e200]:
+                - heading "Track My Orders" [level=3] [ref=e201]
+                - paragraph [ref=e202]: View status and details of all orders
+    - contentinfo [ref=e203]:
+      - generic [ref=e204]:
+        - paragraph [ref=e205]: © 2024 TeleConnect Broadband Services
+        - generic [ref=e207]: "Support: 1800-123-4567"
+  - region "Notifications alt+T"
+  - button "Open Next.js Dev Tools" [ref=e93] [cursor=pointer]:
+    - img [ref=e94]
+  - alert [ref=e97]

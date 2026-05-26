@@ -1,6 +1,9 @@
 import { Given, When, Then, DataTable } from '@cucumber/cucumber';
 import { CustomWorld } from '../core/CustomWorld';
 import { DataStore } from '../utils/DataStore';
+import { PersistentStore } from '../utils/PersistentStore';
+import { RandomDataGenerator } from '../utils/RandomDataGenerator';
+import { FrameworkConfig } from '../config/FrameworkConfig';
 import { Logger } from '../utils/Logger';
 
 Given(
@@ -11,20 +14,14 @@ Given(
 );
 
 Given(
-  /^I (?:am on|navigate to) the base url$/,
+  /^I (?:am on|navigate to|open) the (?:application|app|base url)$/,
   async function (this: CustomWorld) {
-    const fs = await import('fs');
-    const path = await import('path');
-    const ENV = (process.env.ENV as string) || 'qa';
-    const configPath = path.join(__dirname, '../config/environments.json');
-    const environments = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-    const config = environments[ENV];
-    
-    if (!config) {
-      throw new Error(`Environment "${ENV}" not found in environments.json`);
+    const config = FrameworkConfig.getInstance();
+    const appUrl = config.get('app.url', '');
+    if (!appUrl) {
+      throw new Error('app.url not configured in framework.properties');
     }
-    
-    await this.actionEngine.navigateTo(config.baseUrl);
+    await this.actionEngine.navigateTo(appUrl);
   }
 );
 
@@ -106,6 +103,13 @@ When(
 );
 
 When(
+  /^I select ['"](.+)['"] from (?:dropdown|combobox) ['"](.+)['"]$/,
+  async function (this: CustomWorld, optionText: string, dropdownRef: string) {
+    await this.actionEngine.selectComboboxOption(optionText, dropdownRef);
+  }
+);
+
+When(
   /^I check ['"](.+)['"]$/,
   async function (this: CustomWorld, elementRef: string) {
     await this.actionEngine.check(elementRef);
@@ -123,6 +127,18 @@ When(
   /^I upload file ['"](.+)['"] to ['"](.+)['"]$/,
   async function (this: CustomWorld, filePath: string, elementRef: string) {
     await this.actionEngine.uploadFile(filePath, elementRef);
+  }
+);
+
+When(
+  /^I upload ID document ['"](.+)['"]$/,
+  async function (this: CustomWorld, fileName: string) {
+    const path = require('path');
+    // Resolve path relative to project root
+    const resourcePath = path.resolve(__dirname, '../../resources', fileName);
+    Logger.info(`Uploading document: ${fileName} from ${resourcePath}`);
+    await this.actionEngine.uploadFile(resourcePath, 'TeleConnect.UploadIdDocument');
+    Logger.info(`✓ Uploaded ID document: ${fileName}`);
   }
 );
 
@@ -193,14 +209,6 @@ When(
   /^I store attribute ['"](.+)['"] of ['"](.+)['"] as ['"](.+)['"]$/,
   async function (this: CustomWorld, attribute: string, elementRef: string, variableName: string) {
     await this.actionEngine.storeAttribute(elementRef, attribute, variableName);
-  }
-);
-
-Given(
-  /^I set variable ['"](.+)['"] to ['"](.+)['"]$/,
-  async function (this: CustomWorld, variableName: string, value: string) {
-    DataStore.set(variableName, value);
-    Logger.info(`Set variable "${variableName}" = "${value}"`);
   }
 );
 
@@ -332,5 +340,53 @@ When(
     for (const [elementRef] of rows) {
       await this.actionEngine.click(elementRef);
     }
+  }
+);
+
+// Get text from element and persist to JSON file for cross-scenario access via $$VariableName
+When(
+  /^I get text from ['"](.+)['"] and store as ['"](.+)['"]$/,
+  async function (this: CustomWorld, elementRef: string, variableName: string) {
+    const text = await this.actionEngine.getText(elementRef);
+    DataStore.set(variableName, text);
+    PersistentStore.save(variableName, text);
+    Logger.info(`Stored "${text}" as "${variableName}" (persistent — use $$${variableName})`);
+  }
+);
+
+// Persist a variable to JSON file for cross-scenario access
+When(
+  /^I persist ['"](.+)['"] as ['"](.+)['"]$/,
+  async function (this: CustomWorld, value: string, variableName: string) {
+    const resolved = value.replace(/\{(\w+)\}/g, (_, k) => String(DataStore.get(k) ?? `{${k}}`));
+    PersistentStore.save(variableName, resolved);
+    Logger.info(`Persisted "${resolved}" as "${variableName}" (use $$${variableName})`);
+  }
+);
+
+// Use $$variable from persistent store in enter step (auto-resolved via resolveValue)
+// Example: I enter '$$OrderId' into 'Search.Field'
+// This is handled automatically by resolveValue in ActionEngine
+
+// Generate random data using ##FieldName syntax
+// Example: I enter '##FirstName' into 'Form.FirstName'
+// Supported: ##FirstName, ##LastName, ##FullName, ##Email, ##MobileNum, ##PhoneNum,
+//            ##Address, ##City, ##State, ##ZipCode, ##Country, ##Company,
+//            ##JobTitle, ##Username, ##Password
+// This is handled automatically by resolveValue in ActionEngine
+
+// Execute JavaScript to modify DOM (for testing self-healing scenarios)
+Then(
+  /^I execute script to change button text$/,
+  async function (this: CustomWorld) {
+    const page = this.getPage();
+    await page.evaluate(() => {
+      const btn = document.querySelector('[data-testid="btn-new-connection"]');
+      if (btn) {
+        btn.textContent = 'Apply Connection';
+        btn.setAttribute('data-testid', 'btn-apply-connection');
+      }
+    });
+    Logger.info('Injected JS: Changed "New Connection" button to "Apply Connection" and modified data-testid');
   }
 );

@@ -64,13 +64,22 @@ export class ApiEngine {
     this.client = axios.create({
       baseURL: resolvedBase,
       timeout: config.apiTimeout,
+      withCredentials: true,
       headers: {
         'Content-Type': 'application/json',
         Accept: 'application/json',
       },
     });
 
+    this.setupCookieHandling();
     this.setupInterceptors();
+  }
+
+  private cookies: string[] = [];
+
+  private setupCookieHandling(): void {
+    // Cookie handling disabled - using Bearer token authentication instead
+    // Cookies are no longer automatically captured or sent
   }
 
   // ───────────────────────────────────────────────────────────────────────────
@@ -246,11 +255,10 @@ export class ApiEngine {
       for (const row of rows) {
         const key = row[0];
         const rawValue = row[1];
-        // Try to parse booleans and numbers
         let value: unknown = rawValue;
         if (rawValue === 'true') value = true;
         else if (rawValue === 'false') value = false;
-        else if (!isNaN(Number(rawValue)) && rawValue !== '') value = Number(rawValue);
+        else if (!isNaN(Number(rawValue)) && rawValue !== '' && rawValue.length <= 6) value = Number(rawValue);
         result[key] = value;
       }
     }

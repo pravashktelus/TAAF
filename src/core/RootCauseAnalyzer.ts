@@ -86,45 +86,27 @@ export class RootCauseAnalyzer {
   ): Promise<string[]> {
     const suggestions: string[] = [];
 
-    const failureMsg = context.failureMessage.toLowerCase();
+    const lines = analysis.split('\n');
+    let inSuggestions = false;
 
-    if (
-      failureMsg.includes('timeout') ||
-      failureMsg.includes('waiting')
-    ) {
-      suggestions.push('Increase wait timeout or add explicit waits');
-      suggestions.push('Check if element is dynamically loaded');
+    for (const line of lines) {
+      if (line.toLowerCase().includes('suggested fix') || line.toLowerCase().includes('fix:')) {
+        inSuggestions = true;
+        continue;
+      }
+      if (inSuggestions && /^\d+\./.test(line.trim())) {
+        suggestions.push(line.trim().replace(/^\d+\.\s*/, ''));
+      }
     }
 
-    if (failureMsg.includes('not found') || failureMsg.includes('null')) {
-      suggestions.push('Verify element locator is still valid');
-      suggestions.push('Check if page layout changed');
-      suggestions.push('Use self-healing to find alternative locator');
+    if (suggestions.length === 0) {
+      const failureMsg = context.failureMessage.toLowerCase();
+      if (failureMsg.includes('timeout')) suggestions.push('Increase wait timeout or check if element is dynamically loaded');
+      if (failureMsg.includes('not found')) suggestions.push('Verify element locator is still valid on the page');
+      if (failureMsg.includes('401')) suggestions.push('Check authentication — session may have expired');
     }
 
-    if (failureMsg.includes('navigation')) {
-      suggestions.push('Check URL routing and redirects');
-      suggestions.push('Verify network connectivity');
-      suggestions.push('Check for unexpected pop-ups or modals');
-    }
-
-    if (failureMsg.includes('assertion') || failureMsg.includes('expect')) {
-      suggestions.push('Review expected vs actual values');
-      suggestions.push('Check data consistency');
-      suggestions.push('Verify test data is correct');
-    }
-
-    if (failureMsg.includes('401') || failureMsg.includes('403')) {
-      suggestions.push('Check authentication tokens');
-      suggestions.push('Verify user permissions');
-      suggestions.push('Check if session expired');
-    }
-
-    if (analysis && analysis.length > 0) {
-      suggestions.push(analysis.split('\n')[0]);
-    }
-
-    return [...new Set(suggestions)];
+    return suggestions.slice(0, 3);
   }
 
   private async _generateReport(

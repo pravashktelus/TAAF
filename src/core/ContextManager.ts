@@ -2,6 +2,7 @@ import { Browser, BrowserContext, Page, chromium, firefox, webkit } from '@playw
 import * as fs from 'fs';
 import * as path from 'path';
 import { Logger } from '../utils/Logger';
+import { FrameworkConfig } from '../config/FrameworkConfig';
 
 const ENV = (process.env.ENV as string) || 'qa';
 const configPath = path.join(__dirname, '../config/environments.json');
@@ -12,12 +13,14 @@ if (!environmentConfig) {
   throw new Error(`Environment "${ENV}" not found in environments.json`);
 }
 
+const frameworkConfig = FrameworkConfig.getInstance();
+
 const config = {
   env: ENV,
-  browser: ((process.env.BROWSER as string) || 'chromium') as 'chromium' | 'firefox' | 'webkit',
-  headless: process.env.HEADLESS !== 'false',
-  screenshotOnFail: process.env.SCREENSHOT_ON_FAIL !== 'false',
-  video: (process.env.VIDEO as 'on' | 'off' | 'retain-on-failure') || 'retain-on-failure',
+  browser: frameworkConfig.browser,
+  headless: frameworkConfig.headless,
+  screenshotOnFail: frameworkConfig.screenshotOnFail,
+  video: frameworkConfig.get('video', 'retain-on-failure') as 'on' | 'off' | 'retain-on-failure',
   ...environmentConfig,
 };
 
@@ -49,13 +52,13 @@ export class ContextManager {
 
     this.context = await this.browser.newContext({
       baseURL: config.baseUrl,
-      viewport: { width: 1920, height: 1080 },
+      viewport: { width: 1280, height: 720 },
       ignoreHTTPSErrors: true,
       recordVideo:
         config.video !== 'off'
           ? {
               dir: 'reports/videos',
-              size: { width: 1920, height: 1080 },
+              size: { width: 1280, height: 720 },
             }
           : undefined,
     });

@@ -89,15 +89,29 @@ Consider using: XPath, CSS selectors, Playwright role= selectors, data-testid, o
 
       const response = await client.chat.completions.create({
         model: 'gpt-4-turbo',
-        max_tokens: 1024,
+        max_tokens: 300,
         messages: [
           {
             role: 'user',
-            content: `Analyze this test failure and suggest root cause:
+            content: `Analyze this test automation failure concisely.
+
 Test Error: ${failureMessage}
 Recent Actions: ${lastActions.join(' -> ')}
 
-Provide a concise root cause analysis and suggestions for fixing the issue.`,
+Respond in this EXACT format (no markdown headers, no extra text):
+
+Error Explanation (max 100 words):
+<brief explanation of what went wrong>
+
+Possible Root Causes:
+1. <cause 1>
+2. <cause 2>
+3. <cause 3>
+
+Suggested Fixes:
+1. <fix 1>
+2. <fix 2>
+3. <fix 3>`,
           },
         ],
       });

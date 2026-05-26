@@ -47,7 +47,12 @@ Given(
 Given(
   /^I set bearer token ['"](.+)['"]$/,
   async function (this: CustomWorld, token: string) {
-    this.apiEngine.setAuthToken(token);
+    const resolvedToken = token.replace(/\{(\w+)\}/g, (_, k) => {
+      const val = DataStore.get(k);
+      return val !== undefined ? String(val) : process.env[k] || `{${k}}`;
+    });
+    this.apiEngine.setAuthToken(resolvedToken);
+    Logger.info(`Bearer token set: ${resolvedToken.substring(0, 20)}...`);
   }
 );
 

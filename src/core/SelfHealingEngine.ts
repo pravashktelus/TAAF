@@ -123,7 +123,7 @@ export class SelfHealingEngine {
 
           const matchedDetails = await this._extractElementDetails(candidateElement);
 
-          const remainingCandidates = allCandidates.filter((c) => c !== candidate);
+          const remainingCandidates = allCandidates.filter((c) => c !== candidate).slice(0, 5);
 
           const healingResult: HealingResult = {
             referenceName: originalReference,
@@ -161,7 +161,7 @@ export class SelfHealingEngine {
         confidence: 0,
         reason: `Could not find alternative locator for "${resolvedLocator}". Tried ${allCandidates.length} candidates.`,
         bestLocator: null,
-        fallbackLocators: allCandidates,
+        fallbackLocators: allCandidates.slice(0, 5),
         matchedElementDetails: null,
       },
     };
@@ -460,9 +460,13 @@ export class SelfHealingEngine {
 
     if (!focusedDOM) return candidates;
 
-    const testIdMatches = focusedDOM.matchAll(/data-testid="([^"]+)"/g);
+    const expectedTag = resolvedLocator.match(/^\/\/(\w+)/)?.[1] || '';
+
+    const testIdMatches = focusedDOM.matchAll(/<(\w+)[^>]*data-testid="([^"]+)"[^>]*>([^<]*)/g);
     for (const match of testIdMatches) {
-      const testId = match[1];
+      const tag = match[1];
+      const testId = match[2];
+      if (expectedTag && tag !== expectedTag) continue;
       candidates.push({
         type: 'data-testid',
         locator: `page.getByTestId('${testId}')`,
@@ -471,14 +475,16 @@ export class SelfHealingEngine {
       });
     }
 
-    const idMatches = focusedDOM.matchAll(/\bid="([^"]+)"/g);
+    const idMatches = focusedDOM.matchAll(/<(\w+)[^>]*\bid="([^"]+)"[^>]*>/g);
     for (const match of idMatches) {
-      const id = match[1];
-      if (!this._isUnstableId(id)) {
+      const idTag = match[1];
+      const idVal = match[2];
+      if (expectedTag && idTag !== expectedTag) continue;
+      if (!this._isUnstableId(idVal)) {
         candidates.push({
           type: 'id',
-          locator: `page.locator('#${id}')`,
-          rawSelector: `#${id}`,
+          locator: `page.locator('#${idVal}')`,
+          rawSelector: `#${idVal}`,
           confidence: 90,
         });
       }
@@ -560,6 +566,21 @@ export class SelfHealingEngine {
               confidence: 55,
             });
           }
+        }
+      }
+    }
+
+    if (expectedTag === 'button') {
+      const buttonTextMatches = focusedDOM.matchAll(/<button[^>]*>([^<]{2,50})<\/button>/g);
+      for (const match of buttonTextMatches) {
+        const text = match[1].trim();
+        if (text) {
+          candidates.push({
+            type: 'role',
+            locator: `page.getByRole('button', { name: '${text}' })`,
+            rawSelector: `role=button[name='${text}']`,
+            confidence: 88,
+          });
         }
       }
     }
@@ -648,7 +669,7 @@ export class SelfHealingEngine {
         type,
         locator: `page.locator('${s}')`,
         rawSelector: s,
-        confidence: Math.max(60 - index * 5, 30),
+        confidence: Math.max(92 - index * 5, 70),
       };
     });
   }

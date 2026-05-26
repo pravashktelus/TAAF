@@ -1,0 +1,17 @@
+default:
+  requireModule:
+    - ts-node/register
+  require:
+    - src/core/CustomWorld.ts
+    - src/hooks/Hooks.ts
+    - src/steps/**/*.ts
+  paths:
+    - features/**/*.feature
+  tags: "@order-journey-api"
+  format:
+    - progress-bar
+    - json:reports/cucumber-json/cucumber-report.json
+    - html:reports/html/cucumber-report.html
+  formatOptions:
+    snippetInterface: async-await
+  parallel: 1

@@ -1,0 +1,101 @@
+- generic [ref=e3]:
+  - generic [ref=e5]:
+    - link "Allure" [ref=e7] [cursor=pointer]:
+      - /url: "#"
+    - list [ref=e8]:
+      - listitem [ref=e9]:
+        - link " Overview" [ref=e10] [cursor=pointer]:
+          - /url: "#"
+          - generic [ref=e11]: 
+          - generic [ref=e12]: Overview
+      - listitem [ref=e13]:
+        - link " Categories" [ref=e14] [cursor=pointer]:
+          - /url: "#categories"
+          - generic [ref=e15]: 
+          - generic [ref=e16]: Categories
+      - listitem [ref=e17]:
+        - link " Suites" [ref=e18] [cursor=pointer]:
+          - /url: "#suites"
+          - generic [ref=e19]: 
+          - generic [ref=e20]: Suites
+      - listitem [ref=e21]:
+        - link " Graphs" [ref=e22] [cursor=pointer]:
+          - /url: "#graph"
+          - generic [ref=e23]: 
+          - generic [ref=e24]: Graphs
+      - listitem [ref=e25]:
+        - link " Timeline" [ref=e26] [cursor=pointer]:
+          - /url: "#timeline"
+          - generic [ref=e27]: 
+          - generic [ref=e28]: Timeline
+      - listitem [ref=e29]:
+        - link " Behaviors" [ref=e30] [cursor=pointer]:
+          - /url: "#behaviors"
+          - generic [ref=e31]: 
+          - generic [ref=e32]: Behaviors
+      - listitem [ref=e33]:
+        - link " Packages" [ref=e34] [cursor=pointer]:
+          - /url: "#packages"
+          - generic [ref=e35]: 
+          - generic [ref=e36]: Packages
+    - generic [ref=e37]:
+      - button "en" [ref=e39] [cursor=pointer]
+      - generic [ref=e41] [cursor=pointer]:
+        - generic [ref=e42]: 
+        - text: Collapse
+  - generic [ref=e44]:
+    - generic [ref=e45]:
+      - generic [ref=e49]:
+        - generic [ref=e50]:
+          - heading "Allure Report 5/26/2026 14:36:27 - 14:36:27 (190ms)" [level=2] [ref=e51]:
+            - text: Allure Report 5/26/2026
+            - generic [ref=e52]: 14:36:27 - 14:36:27 (190ms)
+          - generic [ref=e53]:
+            - generic [ref=e54]: "14"
+            - generic [ref=e55]: test cases
+        - img [ref=e58]:
+          - generic [ref=e62]: 57.14%
+      - generic [ref=e65]:
+        - heading "Suites 1 item total" [level=2] [ref=e66]
+        - generic [ref=e67]:
+          - link "TeleConnect API - Endpoint Wise Order Lifecycle 6 8" [ref=e68] [cursor=pointer]:
+            - /url: "#suites/443367b37cebbc50071285e84571345e"
+            - generic [ref=e69]: TeleConnect API - Endpoint Wise Order Lifecycle
+            - generic [ref=e71]:
+              - generic [ref=e72]: "6"
+              - generic [ref=e73]: "8"
+          - link "Show all" [ref=e74] [cursor=pointer]:
+            - /url: "#suites"
+            - generic [ref=e75]: Show all
+      - generic [ref=e78]:
+        - heading "Environment" [level=2] [ref=e79]
+        - generic [ref=e80]: There are no environment variables
+      - generic [ref=e83]:
+        - heading "Features by stories 1 item total" [level=2] [ref=e84]
+        - generic [ref=e85]:
+          - link "TeleConnect API - Endpoint Wise Order Lifecycle 6 8" [ref=e86] [cursor=pointer]:
+            - /url: "#behaviors/1efc8cb90af7cf757a42dee496a2fde1"
+            - generic [ref=e87]: TeleConnect API - Endpoint Wise Order Lifecycle
+            - generic [ref=e89]:
+              - generic [ref=e90]: "6"
+              - generic [ref=e91]: "8"
+          - link "Show all" [ref=e92] [cursor=pointer]:
+            - /url: "#behaviors"
+            - generic [ref=e93]: Show all
+    - generic [ref=e94]:
+      - generic [ref=e97]:
+        - heading "Trend" [level=2] [ref=e98]
+        - generic [ref=e101]: There is nothing to show
+      - generic [ref=e104]:
+        - heading "Categories 1 item total" [level=2] [ref=e105]
+        - generic [ref=e106]:
+          - link "Product defects 6" [ref=e107] [cursor=pointer]:
+            - /url: "#categories/8fb3a91ba5aaf9de24cc8a92edc82b5d"
+            - generic [ref=e108]: Product defects
+            - generic [ref=e111]: "6"
+          - link "Show all" [ref=e112] [cursor=pointer]:
+            - /url: "#categories"
+            - generic [ref=e113]: Show all
+      - generic [ref=e116]:
+        - heading "Executors" [level=2] [ref=e117]
+        - generic [ref=e120]: There is no information about tests executors

@@ -3,6 +3,8 @@ import { ElementResolver } from './ElementResolver';
 import { SelfHealingEngine } from './SelfHealingEngine';
 import { HealingResult } from './HealingResult';
 import { DataStore } from '../utils/DataStore';
+import { PersistentStore } from '../utils/PersistentStore';
+import { RandomDataGenerator } from '../utils/RandomDataGenerator';
 import { Logger } from '../utils/Logger';
 import { FrameworkConfig } from '../config/FrameworkConfig';
 
@@ -125,7 +127,10 @@ export class ActionEngine {
   }
 
   private resolveValue(value: string): string {
-    return value.replace(/\{(\w+)\}/g, (_, key) => {
+    let resolved = value;
+    resolved = RandomDataGenerator.resolve(resolved);
+    resolved = PersistentStore.resolve(resolved);
+    resolved = resolved.replace(/\{(\w+)\}/g, (_, key) => {
       const stored = DataStore.get(key);
       if (stored === undefined) {
         Logger.warn(`DataStore variable "${key}" not found. Using literal text.`);
@@ -133,23 +138,45 @@ export class ActionEngine {
       }
       return String(stored);
     });
+    return resolved;
+  }
+
+  // Highlights element with green border for visual verification feedback
+  private async highlightElement(locator: Locator): Promise<void> {
+    try {
+      await locator.evaluate((el) => {
+        const prev = el.style.cssText;
+        el.style.outline = '3px solid #4CAF50';
+        el.style.outlineOffset = '2px';
+        el.setAttribute('data-highlighted', prev);
+        setTimeout(() => {
+          el.style.cssText = el.getAttribute('data-highlighted') || '';
+          el.removeAttribute('data-highlighted');
+        }, 1500);
+      });
+    } catch {
+      // Highlight is best-effort, don't fail the test
+    }
   }
 
   public async click(elementRef: string): Promise<void> {
     Logger.info(`Clicking: ${elementRef}`);
     const locator = await this.getLocatorWithHealing(elementRef, 'click');
+    await locator.scrollIntoViewIfNeeded();
     await locator.click();
   }
 
   public async doubleClick(elementRef: string): Promise<void> {
     Logger.info(`Double-clicking: ${elementRef}`);
     const locator = await this.getLocatorWithHealing(elementRef, 'doubleClick');
+    await locator.scrollIntoViewIfNeeded();
     await locator.dblclick();
   }
 
   public async rightClick(elementRef: string): Promise<void> {
     Logger.info(`Right-clicking: ${elementRef}`);
     const locator = await this.getLocatorWithHealing(elementRef, 'rightClick');
+    await locator.scrollIntoViewIfNeeded();
     await locator.click({ button: 'right' });
   }
 
@@ -157,6 +184,7 @@ export class ActionEngine {
     const resolvedValue = this.resolveValue(value);
     Logger.info(`Entering "${resolvedValue}" into: ${elementRef}`);
     const locator = await this.getLocatorWithHealing(elementRef, 'enter');
+    await locator.scrollIntoViewIfNeeded();
     await locator.clear();
     await locator.fill(resolvedValue);
   }
@@ -165,6 +193,7 @@ export class ActionEngine {
     const resolvedValue = this.resolveValue(value);
     Logger.info(`Typing "${resolvedValue}" into: ${elementRef}`);
     const locator = await this.getLocatorWithHealing(elementRef, 'type');
+    await locator.scrollIntoViewIfNeeded();
     await locator.clear();
     await locator.type(resolvedValue, { delay: 50 });
   }
@@ -190,6 +219,44 @@ export class ActionEngine {
       await locator.selectOption({ label: resolvedValue });
     } else {
       await locator.selectOption(resolvedValue);
+    }
+  }
+
+  public async selectComboboxOption(optionText: string, dropdownRef: string): Promise<void> {
+    const resolvedOption = this.resolveValue(optionText);
+    Logger.info(`Selecting "${resolvedOption}" from combobox: ${dropdownRef}`);
+    
+    const dropdown = await this.getLocatorWithHealing(dropdownRef, 'select');
+    
+    try {
+      // Try selectOption first - works with <select> and many combobox implementations
+      await dropdown.selectOption({ label: resolvedOption });
+      Logger.info(`✓ Selected "${optionText}" using selectOption API`);
+      return;
+    } catch (error) {
+      // If not a select element, fall back to click approach for custom comboboxes
+      const errorMsg = String(error);
+      if (!errorMsg.includes('not a <select> element')) {
+        // If it's a different error, throw it
+        throw error;
+      }
+      Logger.info(`Element is not a standard <select>, using click approach...`);
+    }
+    
+    // For custom combobox elements (divs, buttons, etc), use click approach
+    try {
+      await dropdown.scrollIntoViewIfNeeded();
+      await dropdown.click();
+      await this.page.waitForTimeout(300);
+      
+      const option = this.page.locator(`text=${optionText}`).first();
+      await expect(option).toBeVisible({ timeout: 5000 });
+      await option.click();
+      await this.page.waitForTimeout(300);
+      
+      Logger.info(`✓ Selected "${optionText}" using click approach`);
+    } catch (error) {
+      throw new Error(`Failed to select "${optionText}" from combobox "${dropdownRef}". Error: ${error}`);
     }
   }
 
@@ -220,7 +287,26 @@ export class ActionEngine {
   public async uploadFile(filePath: string, elementRef: string): Promise<void> {
     Logger.info(`Uploading file "${filePath}" to: ${elementRef}`);
     const locator = await this.getLocatorWithHealing(elementRef, 'upload');
-    await locator.setInputFiles(filePath);
+    
+    // Try standard file input first
+    const inputFile = locator.locator('input[type="file"]').first();
+    const hasFileInput = await inputFile.isVisible({ timeout: 1000 }).catch(() => false);
+    
+    if (hasFileInput) {
+      // Standard <input type="file"> element
+      await inputFile.setInputFiles(filePath);
+    } else {
+      // Custom upload element (div/button that opens file dialog)
+      // Promise.all() to handle the file chooser dialog that might appear
+      await Promise.all([
+        this.page.waitForEvent('filechooser'),
+        locator.click(),
+      ]).then(async ([fileChooser]) => {
+        await fileChooser.setFiles(filePath);
+      });
+    }
+    
+    Logger.info(`✓ File uploaded: ${filePath}`);
   }
 
   public async dragAndDrop(sourceRef: string, targetRef: string): Promise<void> {
@@ -233,6 +319,14 @@ export class ActionEngine {
   public async navigateTo(url: string): Promise<void> {
     const resolvedUrl = this.resolveValue(url);
     Logger.info(`Navigating to: ${resolvedUrl}`);
+    const config = FrameworkConfig.getInstance();
+    if (config.get('app.maximizeBrowser', 'true') === 'true') {
+      await this.page.evaluate(() => {
+        window.moveTo(0, 0);
+        window.resizeTo(screen.availWidth, screen.availHeight);
+      }).catch(() => {});
+      await this.page.setViewportSize({ width: 1920, height: 1080 });
+    }
     await this.page.goto(resolvedUrl, { waitUntil: 'domcontentloaded' });
   }
 
@@ -279,6 +373,7 @@ export class ActionEngine {
     Logger.info(`Asserting visible: ${elementRef}`);
     const locator = await this.getLocatorWithHealing(elementRef, 'assertVisible');
     await expect(locator).toBeVisible();
+    await this.highlightElement(locator);
   }
 
   public async assertHidden(elementRef: string): Promise<void> {
@@ -291,6 +386,7 @@ export class ActionEngine {
     Logger.info(`Asserting text "${resolved}" on: ${elementRef}`);
     const locator = await this.getLocatorWithHealing(elementRef, 'assertText');
     await expect(locator).toHaveText(resolved);
+    await this.highlightElement(locator);
   }
 
   public async assertContainsText(elementRef: string, expectedText: string): Promise<void> {
@@ -298,6 +394,7 @@ export class ActionEngine {
     Logger.info(`Asserting contains text "${resolved}" on: ${elementRef}`);
     const locator = await this.getLocatorWithHealing(elementRef, 'assertContainsText');
     await expect(locator).toContainText(resolved);
+    await this.highlightElement(locator);
   }
 
   public async assertValue(elementRef: string, expectedValue: string): Promise<void> {
@@ -305,24 +402,28 @@ export class ActionEngine {
     Logger.info(`Asserting value "${resolved}" on: ${elementRef}`);
     const locator = await this.getLocatorWithHealing(elementRef, 'assertValue');
     await expect(locator).toHaveValue(resolved);
+    await this.highlightElement(locator);
   }
 
   public async assertEnabled(elementRef: string): Promise<void> {
     Logger.info(`Asserting enabled: ${elementRef}`);
     const locator = await this.getLocatorWithHealing(elementRef, 'assertEnabled');
     await expect(locator).toBeEnabled();
+    await this.highlightElement(locator);
   }
 
   public async assertDisabled(elementRef: string): Promise<void> {
     Logger.info(`Asserting disabled: ${elementRef}`);
     const locator = await this.getLocatorWithHealing(elementRef, 'assertDisabled');
     await expect(locator).toBeDisabled();
+    await this.highlightElement(locator);
   }
 
   public async assertChecked(elementRef: string): Promise<void> {
     Logger.info(`Asserting checked: ${elementRef}`);
     const locator = await this.getLocatorWithHealing(elementRef, 'assertChecked');
     await expect(locator).toBeChecked();
+    await this.highlightElement(locator);
   }
 
   public async assertCount(elementRef: string, count: number): Promise<void> {
@@ -351,6 +452,7 @@ export class ActionEngine {
     Logger.info(`Asserting attr "${attribute}"="${resolved}" on: ${elementRef}`);
     const locator = await this.getLocatorWithHealing(elementRef, 'assertAttribute');
     await expect(locator).toHaveAttribute(attribute, resolved);
+    await this.highlightElement(locator);
   }
 
   public async getText(elementRef: string): Promise<string> {

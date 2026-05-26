@@ -4,10 +4,6 @@
   "description": "Playwright TypeScript BDD Framework for Web & API Automation",
   "scripts": {
     "test": "cucumber-js",
-    "test:web": "cucumber-js --tags @web",
-    "test:api": "cucumber-js --tags @api",
-    "test:smoke": "cucumber-js --tags @smoke",
-    "test:regression": "cucumber-js --tags @regression",
     "clean:allure": "rm -rf reports/allure-results reports/allure-report",
     "convert:allure": "npm run clean:allure && node src/utils/GenerateAllureResults.js",
     "report": "node src/utils/GenerateReport.js",
@@ -18,6 +14,7 @@
   "dependencies": {
     "@apidevtools/json-schema-ref-parser": "^11.7.3",
     "@cucumber/cucumber": "^10.3.2",
+    "@faker-js/faker": "^10.4.0",
     "@playwright/test": "^1.43.1",
     "ajv": "^8.16.0",
     "allure-cucumberjs": "^2.13.0",

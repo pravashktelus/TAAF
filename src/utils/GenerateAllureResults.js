@@ -26,6 +26,21 @@ function generateAllureResults() {
     }
 
     const cucumberData = JSON.parse(fs.readFileSync(cucumberReportPath, 'utf8'));
+    
+    // Load all step timing files
+    const stepTimingsMap = new Map();
+    const timingFiles = fs.readdirSync(allureResultsDir)
+      .filter(f => f.startsWith('step-timings-') && f.endsWith('.json'));
+    
+    timingFiles.forEach(file => {
+      try {
+        const timingData = JSON.parse(fs.readFileSync(path.join(allureResultsDir, file), 'utf8'));
+        stepTimingsMap.set(file, timingData);
+      } catch (e) {
+        console.warn(`Failed to read timing file ${file}: ${e.message}`);
+      }
+    });
+
     let totalResults = 0;
 
     cucumberData.forEach((feature) => {
@@ -34,26 +49,49 @@ function generateAllureResults() {
       feature.elements.forEach((scenario) => {
         const resultId = generateUUID();
         const scenarioStatus = getScenarioStatus(scenario);
+        
+        // Try to find the timing file for this scenario
+        let scenarioTimings = null;
+        for (const [fileName, timings] of stepTimingsMap) {
+          if (fileName.includes(scenario.name.replace(/\s+/g, '-'))) {
+            scenarioTimings = timings;
+            break;
+          }
+        }
+
+        const scenarioStart = Date.now() - calculateDuration(scenario);
+        const scenarioStop = Date.now();
 
         const allureResult = {
           uuid: resultId,
-          historyId: scenario.name,
-          fullName: `${feature.name} ${scenario.name}`,
+          historyId: generateUUID(),
+          fullName: `${feature.name}: ${scenario.name}`,
           labels: [
+            { name: 'suite', value: feature.name },
+            { name: 'subSuite', value: scenario.name },
             { name: 'feature', value: feature.name },
             { name: 'story', value: scenario.name },
             { name: 'thread', value: '1' },
             { name: 'host', value: 'localhost' },
             { name: 'language', value: 'javascript' },
+            { name: 'framework', value: 'cucumber-js' },
+            ...(scenario.tags || []).map(t => ({ name: 'tag', value: t.name }))
           ],
           links: [],
           name: scenario.name,
           status: scenarioStatus,
           stage: 'finished',
-          steps: scenario.steps.map((step) => {
+          steps: scenario.steps.map((step, idx) => {
             const stepAttachments = [];
-            const stepStatus = step.result?.status || 'passed';
-            const stepDuration = (step.result?.duration || 0);
+            const cucumberStatus = step.result?.status || 'skipped';
+            let stepStatus = cucumberStatus;
+            if (cucumberStatus === 'undefined') stepStatus = 'broken';
+            if (cucumberStatus === 'pending') stepStatus = 'skipped';
+            if (cucumberStatus === 'ambiguous') stepStatus = 'broken';
+            
+            const stepDuration = step.result?.duration || 0;
+            const stepStart = Date.now() - (scenario.steps.length - idx) * 1000;
+            const stepStop = stepStart + Math.round(stepDuration / 1000000);
             
             // Add exception message only if step failed
             if (stepStatus === 'failed' && step.result?.error_message) {
@@ -101,20 +139,19 @@ function generateAllureResults() {
             }
             
             return {
-              name: (step.keyword + (step.name || '')).trim(),
+              name: `${step.keyword || ''}${step.name || ''}`.trim(),
               status: stepStatus,
               stage: 'finished',
-              start: Date.now(),
-              stop: Date.now(),
-              duration: stepDuration * 1000000,
-              attachments: stepAttachments
+              start: stepStart,
+              stop: stepStop,
+              attachments: stepAttachments,
+              statusDetails: stepStatus === 'failed' ? { message: step.result?.error_message?.split('\n')[0] || '' } : {}
             };
           }),
           attachments: [],
           parameters: [],
-          start: Date.now() - 1000,
-          stop: Date.now(),
-          duration: calculateDuration(scenario),
+          start: scenarioStart,
+          stop: scenarioStop,
           description: scenario.description || '',
         };
 
@@ -123,6 +160,15 @@ function generateAllureResults() {
         
         totalResults++;
       });
+    });
+
+    // Clean up step timing files after processing
+    timingFiles.forEach(file => {
+      try {
+        fs.unlinkSync(path.join(allureResultsDir, file));
+      } catch (e) {
+        console.warn(`Failed to delete timing file ${file}: ${e.message}`);
+      }
     });
 
     console.log(`✓ Allure results generated successfully - ${totalResults} test cases`);
@@ -151,11 +197,11 @@ function getScenarioStatus(scenario) {
 function calculateDuration(scenario) {
   if (!scenario.steps) return 0;
 
-  const totalDuration = scenario.steps.reduce((sum, step) => {
+  const totalNanos = scenario.steps.reduce((sum, step) => {
     return sum + (step.result?.duration || 0);
   }, 0);
 
-  return totalDuration * 1000000;
+  return Math.round(totalNanos / 1000000);
 }
 
 generateAllureResults();

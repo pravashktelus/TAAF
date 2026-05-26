@@ -7,6 +7,7 @@ import { SelfHealingEngine } from '../core/SelfHealingEngine';
 import { VisualTestingEngine } from '../core/VisualTestingEngine';
 import { RootCauseAnalyzer } from '../core/RootCauseAnalyzer';
 import { FrameworkConfig } from '../config/FrameworkConfig';
+import { TestUserManager } from '../utils/TestUserManager';
 import { DataStore } from '../utils/DataStore';
 import { Logger } from '../utils/Logger';
 
@@ -18,14 +19,17 @@ export class CustomWorld extends World {
   public visualTestingEngine!: VisualTestingEngine;
   public rootCauseAnalyzer!: RootCauseAnalyzer;
   public apiEngine: ApiEngine;
+  public testUserManager: TestUserManager;
   public scenarioName: string = '';
   public scenarioTags: string[] = [];
   public testFailed: boolean = false;
+  public stepTimings: Map<string, { startTime: number; endTime: number }> = new Map();
 
   constructor(options: IWorldOptions) {
     super(options);
     this.contextManager = new ContextManager();
     this.apiEngine = new ApiEngine();
+    this.testUserManager = TestUserManager.getInstance();
     Logger.debug('CustomWorld created');
   }
 

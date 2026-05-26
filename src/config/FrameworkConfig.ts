@@ -27,6 +27,12 @@ export class FrameworkConfig {
     attachReport: boolean;
   };
 
+  public readonly testUser: {
+    password: string;
+    name: string;
+    emailDomain: string;
+  };
+
   private constructor() {
     this.loadProperties();
 
@@ -46,6 +52,12 @@ export class FrameworkConfig {
       maxCandidates: this.getNumber('selfHealing.maxCandidates', 10),
       useOpenAI: this.getBool('selfHealing.useOpenAI', true),
       attachReport: this.getBool('selfHealing.attachReport', true),
+    };
+
+    this.testUser = {
+      password: this.get('test.user.password', 'TestUser@123'),
+      name: this.get('test.user.name', 'Test User'),
+      emailDomain: this.get('test.user.emailDomain', 'teleconnect.local'),
     };
   }
 
@@ -86,7 +98,7 @@ export class FrameworkConfig {
     }
   }
 
-  private get(key: string, defaultValue: string): string {
+  public get(key: string, defaultValue: string): string {
     const envKey = key.replace(/\./g, '_').toUpperCase();
     return process.env[envKey] || this.properties[key] || defaultValue;
   }

@@ -7,7 +7,7 @@ default:
     - src/steps/**/*.ts
   paths:
     - features/**/*.feature
-  tags: "@order-journey-api"
+  tags: "@teleconnect_web"
   format:
     - progress-bar
     - json:reports/cucumber-json/cucumber-report.json

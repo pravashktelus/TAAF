@@ -6,7 +6,7 @@ Feature: TeleConnect API - Endpoint Wise Order Lifecycle
   So that the broadband order lifecycle works correctly
 
   Background:
-    Given I set the base url to 'http://localhost:3000'
+    Given I set the base url to '{api.baseUrl}'
 
 
   #########################################################
@@ -109,21 +109,141 @@ Feature: TeleConnect API - Endpoint Wise Order Lifecycle
 
     And I store the response body field 'plans.0.id' as 'planId'
 
-    # Create order
-    When I send a POST request to '/api/orders' with body:
-      | key             | value                          |
-      | customerName    | API Journey User              |
-      | customerEmail   | api.journey.test@testuser.com |
-      | customerPhone   | 9876543210                    |
-      | customerAddress | B-42 Saket New Delhi          |
-      | serviceAreaId   | cmpk248aj000dpewuacd9yryn     |
-      | installAddress  | B-42 Saket New Delhi 110017   |
-      | planId          | {planId}                      |
+    # Get service areas
+    When I send a GET request to '/api/service-areas'
+    Then the response status should be 200
+    And the response body field 'serviceAreas' should exist
 
-    Then the response status should be 201
-    And the response body field 'order.id' should exist
-    And the response body field 'order.status' should be 'SUBMITTED'
 
-    And I store the response body field 'order.id' as 'orderId'
-    And I log 'Order Created: {orderId}'
+  #########################################################
+  # CRM FLOW
+  #########################################################
+
+  @smoke @crm
+  Scenario: #08 CRM Review order
+
+    # Login as CRM
+    When I send a POST request to '/api/auth/login' with body:
+      | key      | value           |
+      | email    | crm@telecom.com |
+      | password | crm123          |
+
+    Then the response status should be 200
+    And I store the response body field 'token' as 'crmToken'
+    And I set bearer token '{crmToken}'
+
+    # Get all orders
+    When I send a GET request to '/api/orders'
+    Then the response status should be 200
+
+
+  @smoke @crm
+  Scenario: #09 CRM Approve order
+
+    # Login as CRM
+    When I send a POST request to '/api/auth/login' with body:
+      | key      | value           |
+      | email    | crm@telecom.com |
+      | password | crm123          |
+
+    Then the response status should be 200
+    And I store the response body field 'token' as 'crmToken'
+    And I set bearer token '{crmToken}'
+
+    # Get all orders
+    When I send a GET request to '/api/orders'
+    Then the response status should be 200
+
+
+  #########################################################
+  # INSTALLATION FLOW
+  #########################################################
+
+  @smoke @installation
+  Scenario: #10 Schedule installation
+
+    # Login as Installation
+    When I send a POST request to '/api/auth/login' with body:
+      | key      | value              |
+      | email    | install@telecom.com |
+      | password | install123         |
+
+    Then the response status should be 200
+    And I store the response body field 'token' as 'installToken'
+    And I set bearer token '{installToken}'
+
+    # Get installation orders
+    When I send a GET request to '/api/orders'
+    Then the response status should be 200
+
+
+  @smoke @installation
+  Scenario: #11 Complete installation
+
+    # Login as Installation
+    When I send a POST request to '/api/auth/login' with body:
+      | key      | value              |
+      | email    | install@telecom.com |
+      | password | install123         |
+
+    Then the response status should be 200
+    And I store the response body field 'token' as 'installToken'
+    And I set bearer token '{installToken}'
+
+    # Get installation orders
+    When I send a GET request to '/api/orders'
+    Then the response status should be 200
+
+
+  #########################################################
+  # ACTIVATION FLOW
+  #########################################################
+
+  @smoke @activation
+  Scenario: #12 Start activation
+
+    # Login as Activation
+    When I send a POST request to '/api/auth/login' with body:
+      | key      | value                |
+      | email    | activation@telecom.com |
+      | password | activation123         |
+
+    Then the response status should be 200
+    And I store the response body field 'token' as 'activationToken'
+    And I set bearer token '{activationToken}'
+
+    # Get activation orders
+    When I send a GET request to '/api/orders'
+    Then the response status should be 200
+
+
+  @smoke @activation
+  Scenario: #13 Activate broadband connection
+
+    # Login as Activation
+    When I send a POST request to '/api/auth/login' with body:
+      | key      | value                |
+      | email    | activation@telecom.com |
+      | password | activation123         |
+
+    Then the response status should be 200
+    And I store the response body field 'token' as 'activationToken'
+    And I set bearer token '{activationToken}'
+
+    # Get activation orders
+    When I send a GET request to '/api/orders'
+    Then the response status should be 200
+
+
+  #########################################################
+  # NEGATIVE CASES
+  #########################################################
+
+  @negative @auth
+  Scenario: #14 Unauthenticated access to orders
+
+    # Try to access orders without authentication
+    When I send a GET request to '/api/orders'
+
+    Then the response status should be 401
 

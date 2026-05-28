@@ -5,6 +5,21 @@ import * as fs from 'fs';
 const LOG_DIR = 'reports/logs';
 if (!fs.existsSync(LOG_DIR)) fs.mkdirSync(LOG_DIR, { recursive: true });
 
+// Clean old logs before each run
+const cleanLogs = () => {
+  try {
+    const files = fs.readdirSync(LOG_DIR);
+    files.forEach((file) => {
+      const filePath = path.join(LOG_DIR, file);
+      fs.unlinkSync(filePath);
+    });
+  } catch (e) {
+    // Ignore errors during cleanup
+  }
+};
+
+cleanLogs();
+
 const logFormat = winston.format.combine(
   winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss.SSS' }),
   winston.format.errors({ stack: true }),
@@ -16,7 +31,7 @@ const logFormat = winston.format.combine(
 );
 
 const logger = winston.createLogger({
-  level: process.env.LOG_LEVEL || 'info',
+  level: process.env.LOG_LEVEL || 'warn',
   format: logFormat,
   transports: [
     new winston.transports.Console({

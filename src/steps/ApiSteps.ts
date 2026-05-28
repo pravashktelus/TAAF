@@ -4,6 +4,7 @@ import { ApiEngine } from '../core/ApiEngine';
 import { ResponseValidator } from '../utils/ResponseValidator';
 import { DataStore } from '../utils/DataStore';
 import { Logger } from '../utils/Logger';
+import { PropertiesLoader } from '../utils/PropertiesLoader';
 
 // =============================================================================
 // API STEP DEFINITIONS
@@ -39,8 +40,12 @@ import { Logger } from '../utils/Logger';
 Given(
   /^I set (?:the )?base (?:url|URL) to ['"](.+)['"]$/,
   async function (this: CustomWorld, baseUrl: string) {
-    this.apiEngine = new ApiEngine(baseUrl);
-    Logger.info(`API base URL set to: ${baseUrl}`);
+    // Resolve properties like {api.baseUrl}
+    const resolvedUrl = baseUrl.replace(/\{([^}]+)\}/g, (_, key) => {
+      return PropertiesLoader.get(key) || `{${key}}`;
+    });
+    this.apiEngine = new ApiEngine(resolvedUrl);
+    Logger.info(`API base URL set to: ${resolvedUrl}`);
   }
 );
 

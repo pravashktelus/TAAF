@@ -4,11 +4,7 @@
   "description": "Playwright TypeScript BDD Framework for Web & API Automation",
   "scripts": {
     "test": "cucumber-js",
-    "clean:allure": "rm -rf reports/allure-results reports/allure-report",
-    "convert:allure": "npm run clean:allure && node src/utils/GenerateAllureResults.js",
-    "report": "node src/utils/GenerateReport.js",
-    "report:allure": "npm run convert:allure && allure generate reports/allure-results --clean -o reports/allure-report",
-    "open:allure": "npm run report:allure && allure open reports/allure-report",
+    "report": "rm -rf reports/html; mkdir -p reports/cucumber-json && node src/utils/GenerateReport.js",
     "clean": "rm -rf reports test-results"
   },
   "dependencies": {
@@ -17,8 +13,6 @@
     "@faker-js/faker": "^10.4.0",
     "@playwright/test": "^1.43.1",
     "ajv": "^8.16.0",
-    "allure-cucumberjs": "^2.13.0",
-    "allure-js-commons": "^2.13.0",
     "axios": "^1.7.2",
     "dotenv": "^16.4.5",
     "multiple-cucumber-html-reporter": "^3.7.0",

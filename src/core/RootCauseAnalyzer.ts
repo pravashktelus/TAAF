@@ -53,11 +53,22 @@ export class RootCauseAnalyzer {
         actionHistory: this.actionHistory,
       };
 
-      const analysis = await OpenAIClient.analyzeFailure(
-        context.failureMessage,
-        context.lastActions,
-        context.screenshot
-      );
+      let analysis: string;
+      try {
+        analysis = await OpenAIClient.analyzeFailure(
+          context.failureMessage,
+          context.lastActions,
+          context.screenshot
+        );
+      } catch {
+        // Fallback to local analysis when OpenAI is unavailable
+        analysis = this._generateLocalAnalysis(context);
+      }
+
+      // If OpenAI returned empty or unavailable, use local analysis
+      if (!analysis || analysis.includes('unavailable') || analysis.includes('could not connect')) {
+        analysis = this._generateLocalAnalysis(context);
+      }
 
       const suggestions = await this._generateSuggestions(enhancedContext, analysis);
 
@@ -72,12 +83,85 @@ export class RootCauseAnalyzer {
       return { analysis, suggestions, report };
     } catch (error) {
       Logger.error(`Failure analysis error: ${error}`);
+      // Even on error, generate a local analysis report
+      const localAnalysis = this._generateLocalAnalysis(context);
+      const suggestions = this._extractLocalSuggestions(context);
+      const report = await this._generateReport(context, localAnalysis, suggestions);
       return {
-        analysis: 'Analysis unavailable',
-        suggestions: ['Check test logs for details'],
-        report: 'report_error.txt',
+        analysis: localAnalysis,
+        suggestions,
+        report,
       };
     }
+  }
+
+  private _generateLocalAnalysis(context: TestFailureContext): string {
+    const msg = context.failureMessage.toLowerCase();
+    const parts: string[] = [];
+
+    parts.push('Error Explanation:');
+
+    if (msg.includes('timeout') || msg.includes('waiting for')) {
+      parts.push('The element was not found within the configured timeout period. This typically indicates the element is not present on the page, is hidden, or the page has not fully loaded.');
+    } else if (msg.includes('not an <input>') || msg.includes('not an <textarea>') || msg.includes('contenteditable')) {
+      parts.push('The locator resolved to a non-editable element (not an input, textarea, select, or contenteditable). The self-healing engine likely matched the wrong element on the page.');
+    } else if (msg.includes('locator resolved to') && msg.includes('fill')) {
+      parts.push('The fill/clear action was attempted on an element that does not support text input. The locator is pointing to the wrong element.');
+    } else if (msg.includes('not found') || msg.includes('no element')) {
+      parts.push('The target element could not be found on the page. The locator may be outdated or the page structure has changed.');
+    } else if (msg.includes('detached') || msg.includes('removed from')) {
+      parts.push('The element was removed from the DOM during interaction. This often happens with dynamic content or page transitions.');
+    } else if (msg.includes('intercepted') || msg.includes('click')) {
+      parts.push('The click action was intercepted by another element (overlay, modal, or tooltip). The target element may be obscured.');
+    } else {
+      parts.push(`A test failure occurred: ${context.failureMessage.substring(0, 200)}`);
+    }
+
+    parts.push('');
+    parts.push('Possible Root Causes:');
+
+    if (msg.includes('self-heal') || msg.includes('healed') || msg.includes('text=')) {
+      parts.push('1. Self-healing resolved to an incorrect element (low confidence match)');
+      parts.push('2. The original locator in the properties file is outdated');
+      parts.push('3. The page structure has changed since the locator was defined');
+    } else if (msg.includes('timeout')) {
+      parts.push('1. Element is dynamically loaded and not yet rendered');
+      parts.push('2. Network latency causing slow page load');
+      parts.push('3. Element is conditionally rendered and the condition is not met');
+    } else {
+      parts.push('1. Locator mismatch — the element selector does not match the current DOM');
+      parts.push('2. Page structure or UI has been updated');
+      parts.push('3. Test data or application state is not as expected');
+    }
+
+    parts.push('');
+    parts.push('Suggested Fixes:');
+    parts.push('1. Update the locator in the properties file to match the current page structure');
+    parts.push('2. Add explicit waits or verify the element is visible before interacting');
+    parts.push('3. Run the test in headed mode to visually confirm the page state');
+
+    return parts.join('\n');
+  }
+
+  private _extractLocalSuggestions(context: TestFailureContext): string[] {
+    const msg = context.failureMessage.toLowerCase();
+    const suggestions: string[] = [];
+
+    if (msg.includes('not an <input>') || msg.includes('fill')) {
+      suggestions.push('Update the locator to target the correct input/textarea element');
+      suggestions.push('Check if the self-healing engine matched the wrong element');
+      suggestions.push('Verify the element type in browser DevTools before updating the locator');
+    } else if (msg.includes('timeout')) {
+      suggestions.push('Increase the element timeout or add an explicit wait');
+      suggestions.push('Verify the element exists on the page in the current state');
+      suggestions.push('Check if a preceding step failed to navigate to the correct page');
+    } else {
+      suggestions.push('Review and update the element locator in the properties file');
+      suggestions.push('Run the test in headed mode to observe the actual page state');
+      suggestions.push('Check recent application changes that may have affected the UI');
+    }
+
+    return suggestions;
   }
 
   private async _generateSuggestions(

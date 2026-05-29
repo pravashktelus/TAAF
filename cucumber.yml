@@ -12,8 +12,9 @@ default:
   #tags: "@teleconnect_web or @teleconnect_crm"
   #tags: "@register-user-api"
   #tags: "@teleconnect_registered-user"
-  tags: "@teleconnect_web"
+  #tags: "@teleconnect_web"
   #tags: "@teleconnect_crm"
+  tags: "@teleconnect_registered-user"
   
   format:
     - progress-bar

@@ -9,9 +9,10 @@ Feature: TeleConnect - Validate Registered User on UI Application
 
         # ═══ Login - registered user ═══
 
-        When I enter 'Test.API@testuser.com' into 'Validate-registered-user.SigninEmail'
-        And I click 'Validate-registered-user.SigninPassword'
-        Then I enter '********' into 'Validate-registered-user.SigninPassword'
+        When I click 'Validate-registered-user.SwitchToLogin'
+        And 'Validate-registered-user.SigninEmail' should be visible
+        And I enter 'Test.API@testuser.com' into 'Validate-registered-user.SigninEmail'
+        And I enter '********' into 'Validate-registered-user.SigninPassword'
         And I click 'Validate-registered-user.SigninButton'
 
 

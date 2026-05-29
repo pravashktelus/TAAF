@@ -1,7 +1,11 @@
 import OpenAI from 'openai';
 import { Logger } from './Logger';
 import * as dotenv from 'dotenv';
+import * as path from 'path';
 
+// Load .env from features/ directory where the API keys are stored
+dotenv.config({ path: path.resolve(__dirname, '../../features/.env') });
+// Also try root .env as fallback
 dotenv.config();
 
 // Centralized OpenAI API client for self-healing, visual testing, and root cause analysis.

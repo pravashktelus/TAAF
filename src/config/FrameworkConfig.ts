@@ -2,6 +2,8 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as dotenv from 'dotenv';
 
+// Load .env from features/ directory where secrets are stored
+dotenv.config({ path: path.resolve(__dirname, '../../features/.env') });
 dotenv.config();
 
 // Loads framework configuration from src/config/framework.properties.

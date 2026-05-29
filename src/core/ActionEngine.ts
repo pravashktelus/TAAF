@@ -186,7 +186,7 @@ export class ActionEngine {
   }
 
   public getLocator(elementRef: string): Locator {
-    const isDotReference = /^[A-Z][A-Za-z0-9]+\.[A-Za-z0-9.]+$/.test(elementRef);
+    const isDotReference = /^[A-Z][A-Za-z0-9\-]+\.[A-Za-z0-9.]+$/.test(elementRef);
     const rawLocator = isDotReference
       ? ElementResolver.resolve(elementRef)
       : elementRef;

@@ -15,6 +15,7 @@ export type ScrollBehavior = 'auto' | 'smooth';
 export class ActionEngine {
   private page: Page;
   private selfHealingEngine: SelfHealingEngine | null = null;
+  private visualTestingEngine: any = null;
   private _stepHealingResults: HealingResult[] = [];
 
   constructor(page: Page) {
@@ -23,6 +24,10 @@ export class ActionEngine {
 
   public setSelfHealingEngine(engine: SelfHealingEngine): void {
     this.selfHealingEngine = engine;
+  }
+
+  public setVisualTestingEngine(engine: any): void {
+    this.visualTestingEngine = engine;
   }
 
   public getStepHealingResults(): HealingResult[] {
@@ -63,6 +68,54 @@ export class ActionEngine {
         `(confidence: ${healingResult.confidence}, type: ${healingResult.bestLocator?.type})`
       );
       this._stepHealingResults.push(healingResult);
+
+      // Highlight the healed element and capture screenshot (only for web tests with visualTestingEngine)
+      if (this.visualTestingEngine && this.page) {
+        try {
+          const healedLocator = healingResult.bestLocator?.rawSelector;
+          if (healedLocator) {
+            // Highlight the healed element with bright green border
+            await this.page.evaluate((selector) => {
+              try {
+                const elements = document.querySelectorAll(selector);
+                elements.forEach((el) => {
+                  (el as HTMLElement).style.border = '4px solid #00FF00';
+                  (el as HTMLElement).style.boxShadow = '0 0 15px rgba(0, 255, 0, 0.9), inset 0 0 10px rgba(0, 255, 0, 0.3)';
+                  (el as HTMLElement).style.backgroundColor = 'rgba(0, 255, 0, 0.15)';
+                });
+              } catch (e) {
+                // Ignore selector errors
+              }
+            }, healedLocator);
+
+            // Wait for highlighting to be visible
+            await this.page.waitForTimeout(300);
+
+            // Capture screenshot with highlighted element
+            const screenshotPath = await this.visualTestingEngine.captureFullPage(
+              `healed_${elementRef.replace(/[^a-zA-Z0-9]/g, '_')}_${Date.now()}`
+            );
+            Logger.info(`Screenshot captured for healed element: ${elementRef}`);
+
+            // Remove highlighting
+            await this.page.evaluate((selector) => {
+              try {
+                const elements = document.querySelectorAll(selector);
+                elements.forEach((el) => {
+                  (el as HTMLElement).style.border = '';
+                  (el as HTMLElement).style.boxShadow = '';
+                  (el as HTMLElement).style.backgroundColor = '';
+                });
+              } catch (e) {
+                // Ignore
+              }
+            }, healedLocator);
+          }
+        } catch (error) {
+          Logger.warn(`Failed to capture screenshot for healed element: ${error}`);
+        }
+      }
+
       return element;
     }
 
@@ -71,6 +124,65 @@ export class ActionEngine {
       `Original locator failed, and self-healing could not recover.\n` +
       `Reason: ${healingResult.reason}`
     );
+  }
+
+  private async highlightAndCaptureHealing(): Promise<void> {
+    if (!this.visualTestingEngine || this._stepHealingResults.length === 0) {
+      return;
+    }
+
+    try {
+      const healingResults = this._stepHealingResults;
+      
+      // Highlight all healed elements
+      for (const hr of healingResults) {
+        const healedLocator = hr.bestLocator?.rawSelector;
+        if (healedLocator) {
+          await this.page.evaluate((selector) => {
+            try {
+              const elements = document.querySelectorAll(selector);
+              elements.forEach((el) => {
+                (el as HTMLElement).style.border = '4px solid #00FF00';
+                (el as HTMLElement).style.boxShadow = '0 0 15px rgba(0, 255, 0, 0.9), inset 0 0 10px rgba(0, 255, 0, 0.3)';
+                (el as HTMLElement).style.backgroundColor = 'rgba(0, 255, 0, 0.15)';
+              });
+            } catch (e) {
+              // Ignore selector errors
+            }
+          }, healedLocator);
+        }
+      }
+
+      // Wait for highlighting to be visible
+      await this.page.waitForTimeout(300);
+
+      // Capture screenshot with highlighted elements
+      const screenshotPath = await this.visualTestingEngine.captureFullPage(
+        `healed_action_${Date.now()}`
+      );
+      Logger.info(`Screenshot captured after action on healed element(s)`);
+
+      // Remove highlighting
+      for (const hr of healingResults) {
+        const healedLocator = hr.bestLocator?.rawSelector;
+        if (healedLocator) {
+          await this.page.evaluate((selector) => {
+            try {
+              const elements = document.querySelectorAll(selector);
+              elements.forEach((el) => {
+                (el as HTMLElement).style.border = '';
+                (el as HTMLElement).style.boxShadow = '';
+                (el as HTMLElement).style.backgroundColor = '';
+              });
+            } catch (e) {
+              // Ignore
+            }
+          }, healedLocator);
+        }
+      }
+    } catch (error) {
+      Logger.warn(`Failed to capture screenshot for healed element: ${error}`);
+    }
   }
 
   public getLocator(elementRef: string): Locator {

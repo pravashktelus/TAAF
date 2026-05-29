@@ -42,29 +42,54 @@ report.generate({
   ignoreBadJsonFile: true,
 });
 
-// Customize the HTML report
-const indexPath = path.join(outputDir, 'index.html');
-if (fs.existsSync(indexPath)) {
-  let content = fs.readFileSync(indexPath, 'utf8');
-  
+// Function to clean HTML content
+function cleanHtmlContent(content) {
   // Remove entire footer section with Wasiq references
   content = content.replace(
     /<footer[^>]*>[\s\S]*?<\/footer>/gi,
     '<footer style="text-align: center; padding: 20px; color: #666; font-size: 12px;">© 2026 TeleConnect QA Automation Team. All rights reserved.</footer>'
   );
   
-  // Remove any remaining Wasiq links
+  // Remove any remaining Wasiq links and text
   content = content.replace(
     /<a[^>]*href="https:\/\/(www\.)?(youtube|github|linkedin|stackoverflow)[^"]*"[^>]*>[\s\S]*?<\/a>/gi,
     ''
   );
   
-  // Remove Wasiq text
+  // Remove Wasiq text variations - more aggressive patterns
   content = content.replace(/Maintained by Wasiq Bhamla[^<]*/gi, '');
+  content = content.replace(/Maintained by Wasim[^<]*/gi, '');
   content = content.replace(/Find me on:/gi, '');
+  content = content.replace(/Wasiq Bhamla/gi, '');
+  content = content.replace(/Wasim/gi, '');
   
-  // Add aggressive CSS to hide Status, Device, OS, Browser, Date columns
-  const customCSS = `
+  // Remove any paragraphs containing Wasiq/Wasim/Find me on
+  content = content.replace(/<p[^>]*>[\s\S]*?(Maintained by|Find me on|Wasiq|Wasim)[\s\S]*?<\/p>/gi, '');
+  
+  // Remove any divs or spans containing Wasiq/Wasim references
+  content = content.replace(/<(div|span)[^>]*>[\s\S]*?(Wasiq|Wasim|Find me on)[\s\S]*?<\/\1>/gi, '');
+  
+  // Remove social media icons section if present
+  content = content.replace(/<div[^>]*class="[^"]*social[^"]*"[^>]*>[\s\S]*?<\/div>/gi, '');
+  
+  return content;
+}
+
+// Customize the HTML report - process all HTML files
+const htmlFiles = fs.readdirSync(outputDir, { recursive: true })
+  .filter(file => file.endsWith('.html'))
+  .map(file => path.join(outputDir, file));
+
+htmlFiles.forEach(filePath => {
+  try {
+    let content = fs.readFileSync(filePath, 'utf8');
+    
+    // Clean the content
+    content = cleanHtmlContent(content);
+    
+    // Add aggressive CSS to hide Status, Device, OS, Browser, Date columns (only for index.html)
+    if (filePath.includes('index.html')) {
+      const customCSS = `
     <style>
       /* Hide Status, Device, OS, Browser, Date columns */
       table thead tr th:nth-child(2),
@@ -111,12 +136,14 @@ if (fs.existsSync(indexPath)) {
       }
     </style>
   `;
-  
-  // Insert custom CSS before closing head tag
-  content = content.replace('</head>', customCSS + '</head>');
-  
-  fs.writeFileSync(indexPath, content, 'utf8');
-}
+      content = content.replace('</head>', customCSS + '</head>');
+    }
+    
+    fs.writeFileSync(filePath, content, 'utf8');
+  } catch (error) {
+    console.warn(`Failed to process ${filePath}: ${error}`);
+  }
+});
 
 console.log('✅ HTML report generated at:', outputDir);
 console.log('📊 Report customized for TeleConnect team');

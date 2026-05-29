@@ -44,6 +44,13 @@ export class CustomWorld extends World {
 
     if (config.selfHealing.enabled) {
       this.actionEngine.setSelfHealingEngine(this.selfHealingEngine);
+      this.actionEngine.setVisualTestingEngine(this.visualTestingEngine);
+      
+      // Pass attach callback to SelfHealingEngine so it can attach screenshots to report
+      this.selfHealingEngine.setAttachCallback(async (buffer: Buffer, mimeType: string) => {
+        await this.attach(buffer, mimeType);
+      });
+      
       Logger.info('Self-healing: ENABLED (configured in framework.properties)');
     } else {
       Logger.info('Self-healing: DISABLED (configured in framework.properties)');

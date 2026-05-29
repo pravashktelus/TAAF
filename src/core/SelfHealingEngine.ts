@@ -10,9 +10,14 @@ export class SelfHealingEngine {
   private locatorCache: Map<string, string> = new Map();
   private healingDetails: Map<string, HealingResult> = new Map();
   private xpathCache: Map<string, string[]> = new Map();
+  private attachCallback: ((buffer: Buffer, mimeType: string) => Promise<void>) | null = null;
 
   constructor(page: Page) {
     this.page = page;
+  }
+
+  public setAttachCallback(callback: (buffer: Buffer, mimeType: string) => Promise<void>): void {
+    this.attachCallback = callback;
   }
 
   async findElementWithHealing(
@@ -137,6 +142,64 @@ export class SelfHealingEngine {
           };
 
           this.healingDetails.set(originalReference, healingResult);
+
+          // Highlight the healed element and capture screenshot
+          try {
+            const selector = candidate.rawSelector;
+            
+            // Try to highlight using the selector
+            const highlightResult = await this.page.evaluate((sel) => {
+              try {
+                const elements = document.querySelectorAll(sel);
+                if (elements.length === 0) {
+                  return { success: false, count: 0, error: 'No elements found' };
+                }
+                elements.forEach((el) => {
+                  (el as HTMLElement).style.border = '4px solid #00FF00';
+                  (el as HTMLElement).style.boxShadow = '0 0 15px rgba(0, 255, 0, 0.9), inset 0 0 10px rgba(0, 255, 0, 0.3)';
+                  (el as HTMLElement).style.backgroundColor = 'rgba(0, 255, 0, 0.15)';
+                });
+                return { success: true, count: elements.length, error: null };
+              } catch (e) {
+                return { success: false, count: 0, error: String(e) };
+              }
+            }, selector);
+
+            if (highlightResult.success) {
+              Logger.info(`Highlighted ${highlightResult.count} element(s) with selector: ${selector}`);
+            } else {
+              Logger.warn(`Failed to highlight element: ${highlightResult.error}`);
+            }
+
+            // Wait for highlighting to be visible and rendered
+            await this.page.waitForTimeout(500);
+
+            // Capture screenshot with highlighted element BEFORE removing highlight
+            const screenshotBuffer = await this.page.screenshot({ fullPage: true });
+            Logger.info(`Screenshot captured for healed element: ${originalReference}`);
+
+            // Attach to report if callback is available
+            if (this.attachCallback) {
+              await this.attachCallback(screenshotBuffer, 'image/png');
+              Logger.info(`Screenshot attached to report for healed element: ${originalReference}`);
+            }
+
+            // NOW remove highlighting after screenshot is captured
+            await this.page.evaluate((sel) => {
+              try {
+                const elements = document.querySelectorAll(sel);
+                elements.forEach((el) => {
+                  (el as HTMLElement).style.border = '';
+                  (el as HTMLElement).style.boxShadow = '';
+                  (el as HTMLElement).style.backgroundColor = '';
+                });
+              } catch (e) {
+                // Ignore
+              }
+            }, selector);
+          } catch (error) {
+            Logger.warn(`Failed to capture screenshot for healed element: ${error}`);
+          }
 
           return {
             element: candidateElement,

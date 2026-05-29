@@ -15,7 +15,7 @@ Feature: TeleConnect - Orders flow down from order placement apps to CRM activit
         
 
         # ═══ Review Order Details - Positive Flow ═══
-        Then I enter '{OrderId}' into 'TeleCRM.CRMHomeSearch'
+        Then I enter '$$OrderId' into 'TeleCRM.CRMHomeSearch'
         And I click 'TeleCRM.CRMReview'
         And I enter 'Review Done!!' into 'TeleCRM.CRMReviewNotes'
         And I click 'TeleCRM.CRMReviewButton'

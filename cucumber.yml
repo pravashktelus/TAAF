@@ -9,13 +9,19 @@ default:
     - features/**/*.feature
     #- features/web/teleconnect.feature
     #- features/web/telecrm.feature
+    
   #tags: "@teleconnect_web or @teleconnect_crm"
+  #tags: "@teleconnect_web"
+  #tags: "@order-journey-api"
   #tags: "@register-user-api"
   #tags: "@teleconnect_registered-user"
   #tags: "@teleconnect_web"
   #tags: "@teleconnect_crm"
-  tags: "@teleconnect_registered-user"
-  
+  #tags: "@teleconnect_registered-user"
+  #tags: "@teleconnect_install"
+  tags: "@teleconnect_homepage"
+  #tags: "@register-user-api or @teleconnect_registered-user"
+  #tags: "@teleconnect_web or @teleconnect_crm or @teleconnect_install"
   format:
     - progress-bar
     - json:reports/cucumber-json/cucumber-report.json

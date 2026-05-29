@@ -43,6 +43,7 @@ export class ContextManager {
 
     this.browser = await browserEngine.launch({
       headless: config.headless,
+      slowMo: parseInt(frameworkConfig.get('slowMo', '0'), 10),
       args: ['--no-sandbox', '--disable-setuid-sandbox'],
     });
 

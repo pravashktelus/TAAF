@@ -4,19 +4,22 @@
   "description": "Playwright TypeScript BDD Framework for Web & API Automation",
   "scripts": {
     "test": "cucumber-js",
-    "report": "rm -rf reports/html; mkdir -p reports/cucumber-json && node src/utils/GenerateReport.js",
-    "clean": "rm -rf reports test-results"
+    "report": "node -e \"const fs=require('fs'),p=require('path');const d=p.join('reports','html');if(fs.existsSync(d))fs.rmSync(d,{recursive:true});fs.mkdirSync(p.join('reports','cucumber-json'),{recursive:true})\" && node src/utils/GenerateReport.js",
+    "clean": "node -e \"const fs=require('fs');['reports','test-results'].forEach(d=>{if(fs.existsSync(d))fs.rmSync(d,{recursive:true})})\""
   },
   "dependencies": {
     "@apidevtools/json-schema-ref-parser": "^11.7.3",
     "@cucumber/cucumber": "^10.3.2",
     "@faker-js/faker": "^10.4.0",
-    "@playwright/test": "^1.43.1",
+    "@playwright/test": "^1.60.0",
     "ajv": "^8.16.0",
     "axios": "^1.7.2",
     "dotenv": "^16.4.5",
     "multiple-cucumber-html-reporter": "^3.7.0",
     "openai": "^4.52.0",
+    "playwright": "^1.60.0",
+    "rm": "^0.1.8",
+    "rmi": "^0.0.1",
     "sharp": "^0.33.0",
     "ts-node": "^10.9.2",
     "typescript": "^5.4.5",

@@ -16,10 +16,10 @@ Feature: TeleConnect Register API - Sign-up process
   Scenario: #01 Register new customer
 
     When I send a POST request to '/api/auth/register' with body:
-      | key      | value                 |
-      | name     | Test User             |
-      | email    | Test.API@testuser.com |
-      | password | ********              |
-      | phone    | 9999200100            |
+      | key      | value                  |
+      | name     | Test1 User             |
+      | email    | Test1.API@testuser.com |
+      | password | ********               |
+      | phone    | 9999200100             |
 
     Then the response status should be in range 200 to 409

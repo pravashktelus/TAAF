@@ -17,7 +17,7 @@ Feature: TeleConnect API - Endpoint Wise Order Lifecycle
   Scenario: #01 Register new customer
 
     When I send a POST request to '/api/auth/register' with body:
-      | key      | value                          |
+      | key      | value                         |
       | name     | API Journey User              |
       | email    | api.journey.test@testuser.com |
       | password | Test@12345                    |

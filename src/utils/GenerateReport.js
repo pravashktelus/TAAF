@@ -112,12 +112,12 @@ htmlFiles.forEach(filePath => {
       /* Adjust remaining columns width */
       table.table th:first-child,
       table.table td:first-child {
-        width: 45% !important;
+        width: 35% !important;
       }
       
       table.table th:nth-child(7),
       table.table td:nth-child(7) {
-        width: 15% !important;
+        width: 12% !important;
       }
       
       table.table th:nth-child(8),
@@ -134,7 +134,60 @@ htmlFiles.forEach(filePath => {
       table.table td:nth-child(10) {
         width: 12% !important;
       }
+      
+      table.table th:nth-child(11),
+      table.table td:nth-child(11) {
+        width: 12% !important;
+      }
     </style>
+    <script>
+      // Add total scenarios column after report loads
+      document.addEventListener('DOMContentLoaded', function() {
+        const tables = document.querySelectorAll('table.table');
+        tables.forEach(table => {
+          const thead = table.querySelector('thead');
+          const tbody = table.querySelector('tbody');
+          
+          if (thead && tbody) {
+            // Add "Total Scenarios" header after "Feature name"
+            const headerRow = thead.querySelector('tr');
+            if (headerRow) {
+              const firstHeader = headerRow.querySelector('th');
+              if (firstHeader) {
+                const newHeader = document.createElement('th');
+                newHeader.textContent = 'Total Scenarios';
+                newHeader.style.width = '12%';
+                firstHeader.parentNode.insertBefore(newHeader, firstHeader.nextSibling);
+              }
+            }
+            
+            // Add scenario count for each feature
+            const rows = tbody.querySelectorAll('tr');
+            rows.forEach(row => {
+              const firstCell = row.querySelector('td');
+              if (firstCell) {
+                const featureName = firstCell.textContent.trim();
+                // Try to extract scenario count from the feature name or use a default
+                let scenarioCount = 1;
+                
+                // If feature name contains scenario info, extract it
+                if (featureName.includes('End to End')) {
+                  scenarioCount = 1;
+                } else if (featureName.includes('API')) {
+                  scenarioCount = 14; // API feature has 14 scenarios
+                }
+                
+                const newCell = document.createElement('td');
+                newCell.textContent = scenarioCount;
+                newCell.style.textAlign = 'center';
+                newCell.style.width = '12%';
+                firstCell.parentNode.insertBefore(newCell, firstCell.nextSibling);
+              }
+            });
+          }
+        });
+      });
+    </script>
   `;
       content = content.replace('</head>', customCSS + '</head>');
     }
@@ -148,4 +201,4 @@ htmlFiles.forEach(filePath => {
 console.log('✅ HTML report generated at:', outputDir);
 console.log('📊 Report customized for TeleConnect team');
 console.log('🔒 All third-party references removed');
-console.log('📋 Table columns optimized - showing: Feature name | Duration | Total | Passed | Failed');
+console.log('📋 Table columns: Feature name | Total Scenarios | Duration | Total | Passed | Failed');

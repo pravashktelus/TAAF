@@ -1,5 +1,5 @@
 @web @teleconnect_crm
-Feature: TeleConnect - Orders flow down from order placement apps to CRM activities
+Feature: 2_TeleConnect - Orders flow down from order placement apps to CRM activities
     As a tester
     I want to execute and validate all downstream CRM activities within a single scenario.
 

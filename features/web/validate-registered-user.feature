@@ -1,5 +1,5 @@
 @web @teleconnect_registered-user
-Feature: TeleConnect - Validate Registered User on UI Application
+Feature: 2_TeleConnect - Validate Registered User on UI Application
     As a new customer
     I want to validate registered users are able to login to system
 
@@ -11,11 +11,11 @@ Feature: TeleConnect - Validate Registered User on UI Application
 
         #When I click 'Validate-registered-user.SwitchToLogin'
         When 'Validate-registered-user.SigninEmail' should be visible
-        Then I enter 'Test1.API@testuser.com' into 'Validate-registered-user.SigninEmail'
-        And I enter '********' into 'Validate-registered-user.SigninPassword'
+        Then I enter '$$Email_viaAPI' into 'Validate-registered-user.SigninEmail'
+        And I enter '$$Password_viaAPI' into 'Validate-registered-user.SigninPassword'
         And I click 'Validate-registered-user.SigninButton'
 
 
         # ═══ Home - validations at home page ═══
-        And 'Validate-registered-user.HomepageWelcomeNote' should have text 'Test1 User'
+        And 'Validate-registered-user.HomepageWelcomeNote' should have text '$$FullName_viaAPI'
         Then 'Validate-registered-user.HomepageLogout' should be visible

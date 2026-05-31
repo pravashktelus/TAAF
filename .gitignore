@@ -34,6 +34,9 @@ logs/
 # Kiro AI internal (not for source control)
 .kiro/
 
+# Playwright MCP snapshots (generated at runtime)
+.playwright-mcp/
+
 # Test baselines (optional - uncomment if you want to track baselines)
 # test-baselines/
 

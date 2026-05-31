@@ -1,5 +1,5 @@
 @web @teleconnect_install
-Feature: TeleConnect - Installation Process for CRM Approved Orders
+Feature: 3_TeleConnect - Installation Process for Approved Orders
     As an installation technician
     I want to schedule and complete broadband installations
     So that customers get their connections activated on time

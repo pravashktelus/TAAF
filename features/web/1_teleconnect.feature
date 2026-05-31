@@ -1,5 +1,5 @@
-@web @teleconnect_web
-Feature: TeleConnect - End to End Order Placement
+@web @teleconnect_orderingestion
+Feature: 1_TeleConnect - Order Placement By User
   As a new customer
   I want to register and place a broadband connection order
   Covering negative validation and positive flow in a single scenario
@@ -15,8 +15,16 @@ Feature: TeleConnect - End to End Order Placement
 
     # ═══ REGISTRATION - Positive Flow ═══
     When I enter '##FullName' into 'TeleConnect.RegisterName'
+    Then I store attribute 'value' of 'TeleConnect.RegisterName' as 'FullName'
+    #Then I get text from '##FullName' and store as 'FullName'
     And I enter '##Email' into 'TeleConnect.LoginEmail'
+    And I store attribute 'value' of 'TeleConnect.LoginEmail' as 'Email'
+    #Then I get text from 'TeleConnect.LoginEmail' and store as 'Email'
     And I enter '##Password' into 'TeleConnect.LoginPassword'
+    And I store attribute 'value' of 'TeleConnect.LoginPassword' as 'Password'
+    And I persist '{FullName}' as 'FullName'
+    And I persist '{Email}' as 'Email'
+    And I persist '{Password}' as 'Password'
     And I click 'TeleConnect.RegisterSubmit'
     Then the url should contain 'customer'
     And 'TeleConnect.WelcomeHeading' should be visible
@@ -27,7 +35,7 @@ Feature: TeleConnect - End to End Order Placement
     And 'TeleConnect.StatActivated' should be visible
 
     # ═══ NAVIGATE TO NEW ORDER ═══
-    
+
     When I execute script to change button text
     And I click 'TeleConnect.BtnNewConnection'
     Then the url should contain 'order'

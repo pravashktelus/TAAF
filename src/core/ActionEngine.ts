@@ -643,4 +643,48 @@ export class ActionEngine {
       });
     });
   }
+
+  public async assertCssColor(elementRef: string, cssProperty: string, expectedColor: string): Promise<void> {
+    Logger.info(`Asserting CSS "${cssProperty}" is "${expectedColor}" on: ${elementRef}`);
+    const locator = await this.getLocatorWithHealing(elementRef, 'assertCssColor');
+    const actualColor = await locator.evaluate((el, prop) => {
+      const style = window.getComputedStyle(el);
+      const raw = style.getPropertyValue(prop);
+      // Convert any color format to RGB using canvas
+      const canvas = document.createElement('canvas');
+      canvas.width = 1;
+      canvas.height = 1;
+      const ctx = canvas.getContext('2d')!;
+      ctx.fillStyle = raw;
+      ctx.fillRect(0, 0, 1, 1);
+      const [r, g, b] = ctx.getImageData(0, 0, 1, 1).data;
+      return { raw, r, g, b };
+    }, cssProperty);
+
+    const colorName = expectedColor.toLowerCase();
+    let isMatch = false;
+
+    if (colorName === 'red') {
+      // Red: high R, low G and B (threshold allows for dark reds like text-red-800)
+      isMatch = actualColor.r > 100 && actualColor.g < 80 && actualColor.b < 80;
+    } else if (colorName === 'green') {
+      isMatch = actualColor.g > 80 && actualColor.r < 80 && actualColor.b < 80;
+    } else if (colorName === 'blue') {
+      isMatch = actualColor.b > 100 && actualColor.r < 80 && actualColor.g < 80;
+    } else if (colorName === 'orange') {
+      isMatch = actualColor.r > 150 && actualColor.g > 60 && actualColor.g < 180 && actualColor.b < 60;
+    } else {
+      throw new Error(`Unsupported color name: "${expectedColor}". Supported: red, green, blue, orange`);
+    }
+
+    if (!isMatch) {
+      throw new Error(
+        `Expected "${elementRef}" CSS "${cssProperty}" to be "${expectedColor}" ` +
+        `but got rgb(${actualColor.r}, ${actualColor.g}, ${actualColor.b}) [raw: ${actualColor.raw}]`
+      );
+    }
+
+    Logger.info(`✓ CSS color assertion passed: ${cssProperty} is ${expectedColor} (rgb: ${actualColor.r},${actualColor.g},${actualColor.b})`);
+    await this.highlightElement(locator);
+  }
 }

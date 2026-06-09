@@ -23,8 +23,9 @@ default:
   #tags: "@teleconnect_install"
   #tags: "@teleconnect_homepage"
   #tags: "@teleconnect_activate"
-  #tags: "@register-user-api or @teleconnect_registered-user"
-  tags: "@teleconnect_orderingestion or @teleconnect_crm or @teleconnect_install or @teleconnect_activate or @teleconnect_verify"
+  tags: "@register-user-api or @teleconnect_registered-user"
+  #tags: "@customersupport_web"
+  #tags: "@teleconnect_orderingestion or @teleconnect_crm or @teleconnect_install or @teleconnect_activate or @teleconnect_verify"
   format:
     - progress-bar
     - json:reports/cucumber-json/cucumber-report.json

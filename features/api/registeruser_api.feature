@@ -17,12 +17,12 @@ Feature: 1_TeleConnect Register API - Sign-up process
 
     When I send a POST request to '/api/auth/register' with body:
       | key      | value                  |
-      | name     | Test2 User             |
-      | email    | Test2.API@testuser.com |
+      | name     | Test3 User             |
+      | email    | Test3.API@testuser.com |
       | password | ********               |
       | phone    | 9999200100             |
 
-    And I persist 'Test2 User' as 'FullName_viaAPI'
-    And I persist 'Test2.API@testuser.com' as 'Email_viaAPI'
+    And I persist 'Test3 User' as 'FullName_viaAPI'
+    And I persist 'Test3.API@testuser.com' as 'Email_viaAPI'
     And I persist '********' as 'Password_viaAPI'
     Then the response status should be in range 200 to 409

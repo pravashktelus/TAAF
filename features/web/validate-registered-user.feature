@@ -4,7 +4,7 @@ Feature: 2_TeleConnect - Validate Registered User on UI Application
     I want to validate registered users are able to login to system
 
     @smoke @login
-    Scenario: Registerd user should be able to login to system
+    Scenario: Registered user should be able to login to system
         Given I navigate to the application
 
         # ═══ Login - registered user ═══

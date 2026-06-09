@@ -375,6 +375,25 @@ When(
 //            ##JobTitle, ##Username, ##Password
 // This is handled automatically by resolveValue in ActionEngine
 
+// Verify CSS color of an element's text (supports named colors: red, green, blue, orange)
+Then(
+  /^['"](.+)['"] should have (?:text )?color ['"](.+)['"]$/,
+  async function (this: CustomWorld, elementRef: string, expectedColor: string) {
+    await this.actionEngine.assertCssColor(elementRef, 'color', expectedColor);
+  }
+);
+
+// Attach a stored variable value to the test report for visibility
+Then(
+  /^I attach ['"](.+)['"] to (?:the )?report as ['"](.+)['"]$/,
+  async function (this: CustomWorld, variableName: string, label: string) {
+    const value = String(DataStore.get(variableName) ?? `Variable "${variableName}" not found`);
+    const reportEntry = `${label}: ${value}`;
+    await this.attach(reportEntry, 'text/plain');
+    Logger.info(`📎 Attached to report — ${reportEntry}`);
+  }
+);
+
 // Execute JavaScript to modify DOM (for testing self-healing scenarios)
 Then(
   /^I execute script to change button text$/,

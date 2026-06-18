@@ -22,10 +22,14 @@ export class PropertiesLoader {
     });
   }
 
+  // Gets a property value by key, with optional default fallback
+  // Usage: PropertiesLoader.get("app.url", "http://localhost:3000")
   static get(key: string, defaultValue?: string): string {
     return this.properties.get(key) || defaultValue || '';
   }
 
+  // Returns all loaded properties as a Map
+  // Usage: const allProps = PropertiesLoader.getAll()
   static getAll(): Map<string, string> {
     return new Map(this.properties);
   }

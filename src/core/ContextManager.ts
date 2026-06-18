@@ -32,6 +32,8 @@ export class ContextManager {
   private context: BrowserContext | null = null;
   private page: Page | null = null;
 
+  // Launches the configured browser and creates a new page context
+  // Usage: await contextManager.launch()
   public async launch(): Promise<void> {
     Logger.info(`Launching ${config.browser} browser (headless: ${config.headless})`);
 
@@ -71,6 +73,8 @@ export class ContextManager {
     Logger.info('Browser context and page created successfully');
   }
 
+  // Closes the browser and cleans up resources (takes failure screenshot if needed)
+  // Usage: await contextManager.close(testFailed)
   public async close(testFailed: boolean = false): Promise<void> {
     if (config.screenshotOnFail && testFailed && this.page) {
       try {
@@ -109,6 +113,8 @@ export class ContextManager {
     Logger.info('Browser closed');
   }
 
+  // Returns the active Page instance (throws if not launched)
+  // Usage: const page = contextManager.getPage()
   public getPage(): Page {
     if (!this.page) {
       throw new Error(
@@ -118,6 +124,8 @@ export class ContextManager {
     return this.page;
   }
 
+  // Returns the active BrowserContext instance
+  // Usage: const ctx = contextManager.getContext()
   public getContext(): BrowserContext {
     if (!this.context) {
       throw new Error('BrowserContext is not initialized.');
@@ -125,6 +133,8 @@ export class ContextManager {
     return this.context;
   }
 
+  // Returns the active Browser instance
+  // Usage: const browser = contextManager.getBrowser()
   public getBrowser(): Browser {
     if (!this.browser) {
       throw new Error('Browser is not initialized.');
@@ -132,11 +142,15 @@ export class ContextManager {
     return this.browser;
   }
 
+  // Clears all browser cookies in the current context
+  // Usage: await contextManager.clearCookies()
   public async clearCookies(): Promise<void> {
     await this.getContext().clearCookies();
     Logger.info('Cookies cleared');
   }
 
+  // Clears localStorage and sessionStorage
+  // Usage: await contextManager.clearStorage()
   public async clearStorage(): Promise<void> {
     await this.getPage().evaluate(() => {
       localStorage.clear();
@@ -145,11 +159,15 @@ export class ContextManager {
     Logger.info('Local & session storage cleared');
   }
 
+  // Saves auth cookies/storage to a file (for session reuse)
+  // Usage: await contextManager.saveStorageState("testdata/auth.json")
   public async saveStorageState(filePath: string): Promise<void> {
     await this.getContext().storageState({ path: filePath });
     Logger.info(`Storage state saved to: ${filePath}`);
   }
 
+  // Loads a previously saved storage state file
+  // Usage: await contextManager.loadStorageState("testdata/auth.json")
   public async loadStorageState(filePath: string): Promise<void> {
     if (!fs.existsSync(filePath)) {
       Logger.warn(`Storage state file not found: ${filePath}`);

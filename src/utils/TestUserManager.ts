@@ -23,6 +23,8 @@ export class TestUserManager {
     this.config = FrameworkConfig.getInstance();
   }
 
+  // Returns singleton instance of TestUserManager
+  // Usage: const mgr = TestUserManager.getInstance()
   public static getInstance(): TestUserManager {
     if (!this.instance) {
       this.instance = new TestUserManager();
@@ -30,10 +32,8 @@ export class TestUserManager {
     return this.instance;
   }
 
-  /**
-   * Generates a new test user with unique email
-   * Email format: test-{timestamp}@{emailDomain}
-   */
+  // Generates a new test user with unique timestamped email
+  // Usage: const user = TestUserManager.getInstance().generateNewUser()
   public generateNewUser(): TestUser {
     const timestamp = Date.now();
     const email = `test-${timestamp}@${this.config.testUser.emailDomain}`;
@@ -49,17 +49,14 @@ export class TestUserManager {
     return this.currentUser;
   }
 
-  /**
-   * Gets the current test user (if any)
-   */
+  // Gets the current test user object (null if not generated yet)
+  // Usage: const user = mgr.getCurrentUser()
   public getCurrentUser(): TestUser | null {
     return this.currentUser;
   }
 
-  /**
-   * Gets the current test user email
-   * Throws error if no user has been generated yet
-   */
+  // Gets the current test user's email (throws if no user generated)
+  // Usage: const email = mgr.getCurrentEmail()
   public getCurrentEmail(): string {
     if (!this.currentUser) {
       throw new Error('No test user has been generated yet. Call generateNewUser() first.');
@@ -67,9 +64,8 @@ export class TestUserManager {
     return this.currentUser.email;
   }
 
-  /**
-   * Gets the current test user password
-   */
+  // Gets the current test user's password (throws if no user generated)
+  // Usage: const pwd = mgr.getPassword()
   public getPassword(): string {
     if (!this.currentUser) {
       throw new Error('No test user has been generated yet. Call generateNewUser() first.');
@@ -77,9 +73,8 @@ export class TestUserManager {
     return this.currentUser.password;
   }
 
-  /**
-   * Gets the current test user name
-   */
+  // Gets the current test user's name (throws if no user generated)
+  // Usage: const name = mgr.getName()
   public getName(): string {
     if (!this.currentUser) {
       throw new Error('No test user has been generated yet. Call generateNewUser() first.');
@@ -87,9 +82,8 @@ export class TestUserManager {
     return this.currentUser.name;
   }
 
-  /**
-   * Resets the current user (for cleanup)
-   */
+  // Resets the current user to null (cleanup between test runs)
+  // Usage: mgr.resetUser()
   public resetUser(): void {
     this.currentUser = null;
   }

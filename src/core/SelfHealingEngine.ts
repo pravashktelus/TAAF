@@ -16,10 +16,14 @@ export class SelfHealingEngine {
     this.page = page;
   }
 
+  // Sets the callback for attaching screenshots to the test report
+  // Usage: selfHealingEngine.setAttachCallback(this.attach.bind(this))
   public setAttachCallback(callback: (buffer: Buffer, mimeType: string) => Promise<void>): void {
     this.attachCallback = callback;
   }
 
+  // Attempts to find an element, falling back to self-healing if the original locator fails
+  // Usage: const { element, healingResult } = await engine.findElementWithHealing("LoginPage.Btn", "click")
   async findElementWithHealing(
     originalReference: string,
     action: string
@@ -230,6 +234,8 @@ export class SelfHealingEngine {
     };
   }
 
+  // Checks if an element is visible and accessible on the page
+  // Usage: const accessible = await engine.isElementAccessible(locator)
   async isElementAccessible(element: Locator): Promise<boolean> {
     try {
       const count = await element.count();
@@ -241,6 +247,8 @@ export class SelfHealingEngine {
     }
   }
 
+  // Clears the healing locator cache (called between scenarios)
+  // Usage: engine.clearCache()
   clearCache(): void {
     this.locatorCache.clear();
     this.healingDetails.clear();
@@ -248,6 +256,8 @@ export class SelfHealingEngine {
     Logger.debug('Self-healing cache cleared');
   }
 
+  // Returns cache stats (size and cached element references)
+  // Usage: const stats = engine.getCacheStats()
   getCacheStats(): { size: number; entries: string[] } {
     return {
       size: this.locatorCache.size,
@@ -255,6 +265,8 @@ export class SelfHealingEngine {
     };
   }
 
+  // Returns detailed stats of all successful healing operations in the current session
+  // Usage: const healed = engine.getDetailedHealingStats()
   getDetailedHealingStats(): Array<{
     reference: string;
     originalLocator: string;

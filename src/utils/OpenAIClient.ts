@@ -12,6 +12,8 @@ dotenv.config();
 export class OpenAIClient {
   private static instance: OpenAI;
 
+  // Returns a singleton OpenAI client instance (configured from OPENAI_API_KEY env var)
+  // Usage: const client = OpenAIClient.getInstance()
   static getInstance(): OpenAI {
     if (!this.instance) {
       const apiKey = process.env.OPENAI_API_KEY;
@@ -23,6 +25,8 @@ export class OpenAIClient {
     return this.instance;
   }
 
+  // Analyzes a UI screenshot using GPT-4 to identify visual issues
+  // Usage: const report = await OpenAIClient.analyzeScreenshot(base64Img, "login page")
   static async analyzeScreenshot(
     imageBase64: string,
     context: string
@@ -50,6 +54,8 @@ export class OpenAIClient {
     }
   }
 
+  // Asks GPT-4 to suggest an alternative locator when the original one fails
+  // Usage: const newLocator = await OpenAIClient.suggestSelfHeal("//button[@id='old']", context, pageState)
   static async suggestSelfHeal(
     originalLocator: string,
     elementContext: string,
@@ -83,6 +89,8 @@ Consider using: XPath, CSS selectors, Playwright role= selectors, data-testid, o
     }
   }
 
+  // Analyzes a test failure and returns root cause + suggested fixes
+  // Usage: const analysis = await OpenAIClient.analyzeFailure("timeout", ["click login", "enter email"])
   static async analyzeFailure(
     failureMessage: string,
     lastActions: string[],
@@ -129,6 +137,8 @@ Suggested Fixes:
     }
   }
 
+  // Compares current vs expected screenshot and returns match result with feedback
+  // Usage: const result = await OpenAIClient.validateVisuals(currentImg, expectedImg, "checkout page")
   static async validateVisuals(
     currentImageBase64: string,
     expectedImageBase64: string,

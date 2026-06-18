@@ -271,6 +271,8 @@ export class ActionEngine {
     }
   }
 
+  // Clicks an element (auto-scrolls into view first)
+  // Usage: await actionEngine.click("LoginPage.SubmitBtn")
   public async click(elementRef: string): Promise<void> {
     Logger.info(`Clicking: ${elementRef}`);
     const locator = await this.getLocatorWithHealing(elementRef, 'click');
@@ -278,6 +280,8 @@ export class ActionEngine {
     await locator.click();
   }
 
+  // Double-clicks an element
+  // Usage: await actionEngine.doubleClick("TablePage.Row1")
   public async doubleClick(elementRef: string): Promise<void> {
     Logger.info(`Double-clicking: ${elementRef}`);
     const locator = await this.getLocatorWithHealing(elementRef, 'doubleClick');
@@ -285,6 +289,8 @@ export class ActionEngine {
     await locator.dblclick();
   }
 
+  // Right-clicks an element (context menu)
+  // Usage: await actionEngine.rightClick("FilePage.Document")
   public async rightClick(elementRef: string): Promise<void> {
     Logger.info(`Right-clicking: ${elementRef}`);
     const locator = await this.getLocatorWithHealing(elementRef, 'rightClick');
@@ -292,6 +298,8 @@ export class ActionEngine {
     await locator.click({ button: 'right' });
   }
 
+  // Clears and fills a value into an input field (supports ##random and {variable} syntax)
+  // Usage: await actionEngine.enter("##Email", "LoginPage.EmailField")
   public async enter(value: string, elementRef: string): Promise<void> {
     const resolvedValue = this.resolveValue(value);
     Logger.info(`Entering "${resolvedValue}" into: ${elementRef}`);
@@ -301,6 +309,8 @@ export class ActionEngine {
     await locator.fill(resolvedValue);
   }
 
+  // Types text character-by-character with delay (triggers key handlers)
+  // Usage: await actionEngine.clearAndType("search term", "SearchPage.Input")
   public async clearAndType(value: string, elementRef: string): Promise<void> {
     const resolvedValue = this.resolveValue(value);
     Logger.info(`Typing "${resolvedValue}" into: ${elementRef}`);
@@ -310,6 +320,8 @@ export class ActionEngine {
     await locator.type(resolvedValue, { delay: 50 });
   }
 
+  // Presses a keyboard key (optionally on a specific element)
+  // Usage: await actionEngine.pressKey("Enter") or await actionEngine.pressKey("Tab", "Form.Input")
   public async pressKey(key: string, elementRef?: string): Promise<void> {
     Logger.info(`Pressing key "${key}"${elementRef ? ` on: ${elementRef}` : ''}`);
     if (elementRef) {
@@ -319,6 +331,8 @@ export class ActionEngine {
     }
   }
 
+  // Selects an option from a <select> dropdown by label or value
+  // Usage: await actionEngine.selectOption("Canada", "Form.CountryDropdown")
   public async selectOption(value: string, elementRef: string): Promise<void> {
     const resolvedValue = this.resolveValue(value);
     Logger.info(`Selecting "${resolvedValue}" in: ${elementRef}`);
@@ -334,6 +348,8 @@ export class ActionEngine {
     }
   }
 
+  // Selects an option from a combobox (handles both native <select> and custom dropdowns)
+  // Usage: await actionEngine.selectComboboxOption("Premium Plan", "Plans.Dropdown")
   public async selectComboboxOption(optionText: string, dropdownRef: string): Promise<void> {
     const resolvedOption = this.resolveValue(optionText);
     Logger.info(`Selecting "${resolvedOption}" from combobox: ${dropdownRef}`);
@@ -372,30 +388,40 @@ export class ActionEngine {
     }
   }
 
+  // Checks a checkbox element
+  // Usage: await actionEngine.check("Form.AgreeCheckbox")
   public async check(elementRef: string): Promise<void> {
     Logger.info(`Checking: ${elementRef}`);
     const locator = await this.getLocatorWithHealing(elementRef, 'check');
     await locator.check();
   }
 
+  // Unchecks a checkbox element
+  // Usage: await actionEngine.uncheck("Form.NewsletterCheckbox")
   public async uncheck(elementRef: string): Promise<void> {
     Logger.info(`Unchecking: ${elementRef}`);
     const locator = await this.getLocatorWithHealing(elementRef, 'uncheck');
     await locator.uncheck();
   }
 
+  // Hovers over an element (triggers hover states/tooltips)
+  // Usage: await actionEngine.hover("Nav.ProfileMenu")
   public async hover(elementRef: string): Promise<void> {
     Logger.info(`Hovering over: ${elementRef}`);
     const locator = await this.getLocatorWithHealing(elementRef, 'hover');
     await locator.hover();
   }
 
+  // Scrolls the page until the element is in view
+  // Usage: await actionEngine.scrollTo("Footer.Copyright")
   public async scrollTo(elementRef: string): Promise<void> {
     Logger.info(`Scrolling to: ${elementRef}`);
     const locator = await this.getLocatorWithHealing(elementRef, 'scroll');
     await locator.scrollIntoViewIfNeeded();
   }
 
+  // Uploads a file to a file input or custom upload element
+  // Usage: await actionEngine.uploadFile("testdata/photo.png", "Profile.AvatarUpload")
   public async uploadFile(filePath: string, elementRef: string): Promise<void> {
     Logger.info(`Uploading file "${filePath}" to: ${elementRef}`);
     const locator = await this.getLocatorWithHealing(elementRef, 'upload');
@@ -421,6 +447,8 @@ export class ActionEngine {
     Logger.info(`✓ File uploaded: ${filePath}`);
   }
 
+  // Drags one element and drops it onto another
+  // Usage: await actionEngine.dragAndDrop("Board.Card1", "Board.Column2")
   public async dragAndDrop(sourceRef: string, targetRef: string): Promise<void> {
     Logger.info(`Dragging "${sourceRef}" to "${targetRef}"`);
     const source = await this.getLocatorWithHealing(sourceRef, 'drag');
@@ -428,6 +456,8 @@ export class ActionEngine {
     await source.dragTo(target);
   }
 
+  // Navigates the browser to a URL (maximizes window if configured)
+  // Usage: await actionEngine.navigateTo("https://example.com/login")
   public async navigateTo(url: string): Promise<void> {
     const resolvedUrl = this.resolveValue(url);
     Logger.info(`Navigating to: ${resolvedUrl}`);
@@ -442,21 +472,29 @@ export class ActionEngine {
     await this.page.goto(resolvedUrl, { waitUntil: 'domcontentloaded' });
   }
 
+  // Navigates browser back one page
+  // Usage: await actionEngine.goBack()
   public async goBack(): Promise<void> {
     Logger.info('Navigating back');
     await this.page.goBack();
   }
 
+  // Navigates browser forward one page
+  // Usage: await actionEngine.goForward()
   public async goForward(): Promise<void> {
     Logger.info('Navigating forward');
     await this.page.goForward();
   }
 
+  // Refreshes the current page
+  // Usage: await actionEngine.refreshPage()
   public async refreshPage(): Promise<void> {
     Logger.info('Refreshing page');
     await this.page.reload({ waitUntil: 'domcontentloaded' });
   }
 
+  // Waits for an element to reach a specific state (visible, hidden, attached, detached)
+  // Usage: await actionEngine.waitForElement("Modal.CloseBtn", "visible", 5000)
   public async waitForElement(
     elementRef: string,
     state: WaitStrategy = 'visible',
@@ -471,16 +509,22 @@ export class ActionEngine {
     }
   }
 
+  // Waits for page navigation to complete (optionally to a specific URL)
+  // Usage: await actionEngine.waitForNavigation("*/dashboard*")
   public async waitForNavigation(url?: string): Promise<void> {
     Logger.info(`Waiting for navigation${url ? ` to ${url}` : ''}`);
     await this.page.waitForURL(url || /.*/, { waitUntil: 'domcontentloaded' });
   }
 
+  // Hard wait for X seconds (use sparingly — prefer element waits)
+  // Usage: await actionEngine.waitForSeconds(2)
   public async waitForSeconds(seconds: number): Promise<void> {
     Logger.warn(`Explicit wait for ${seconds}s — consider replacing with a proper wait`);
     await this.page.waitForTimeout(seconds * 1000);
   }
 
+  // Asserts an element is visible on the page
+  // Usage: await actionEngine.assertVisible("Dashboard.WelcomeMsg")
   public async assertVisible(elementRef: string): Promise<void> {
     Logger.info(`Asserting visible: ${elementRef}`);
     const locator = await this.getLocatorWithHealing(elementRef, 'assertVisible');
@@ -488,11 +532,15 @@ export class ActionEngine {
     await this.highlightElement(locator);
   }
 
+  // Asserts an element is hidden/not visible
+  // Usage: await actionEngine.assertHidden("Modal.Overlay")
   public async assertHidden(elementRef: string): Promise<void> {
     Logger.info(`Asserting hidden: ${elementRef}`);
     await expect(this.getLocator(elementRef)).toBeHidden();
   }
 
+  // Asserts an element's text content matches exactly
+  // Usage: await actionEngine.assertText("Cart.Total", "$99.00")
   public async assertText(elementRef: string, expectedText: string): Promise<void> {
     const resolved = this.resolveValue(expectedText);
     Logger.info(`Asserting text "${resolved}" on: ${elementRef}`);
@@ -501,6 +549,8 @@ export class ActionEngine {
     await this.highlightElement(locator);
   }
 
+  // Asserts an element's text contains a substring
+  // Usage: await actionEngine.assertContainsText("Alert.Message", "success")
   public async assertContainsText(elementRef: string, expectedText: string): Promise<void> {
     const resolved = this.resolveValue(expectedText);
     Logger.info(`Asserting contains text "${resolved}" on: ${elementRef}`);
@@ -509,6 +559,8 @@ export class ActionEngine {
     await this.highlightElement(locator);
   }
 
+  // Asserts an input element's value matches
+  // Usage: await actionEngine.assertValue("Form.Email", "user@test.com")
   public async assertValue(elementRef: string, expectedValue: string): Promise<void> {
     const resolved = this.resolveValue(expectedValue);
     Logger.info(`Asserting value "${resolved}" on: ${elementRef}`);
@@ -517,6 +569,8 @@ export class ActionEngine {
     await this.highlightElement(locator);
   }
 
+  // Asserts an element is enabled (clickable/interactable)
+  // Usage: await actionEngine.assertEnabled("Form.SubmitBtn")
   public async assertEnabled(elementRef: string): Promise<void> {
     Logger.info(`Asserting enabled: ${elementRef}`);
     const locator = await this.getLocatorWithHealing(elementRef, 'assertEnabled');
@@ -524,6 +578,8 @@ export class ActionEngine {
     await this.highlightElement(locator);
   }
 
+  // Asserts an element is disabled
+  // Usage: await actionEngine.assertDisabled("Form.SubmitBtn")
   public async assertDisabled(elementRef: string): Promise<void> {
     Logger.info(`Asserting disabled: ${elementRef}`);
     const locator = await this.getLocatorWithHealing(elementRef, 'assertDisabled');
@@ -531,6 +587,8 @@ export class ActionEngine {
     await this.highlightElement(locator);
   }
 
+  // Asserts a checkbox is checked
+  // Usage: await actionEngine.assertChecked("Form.RememberMe")
   public async assertChecked(elementRef: string): Promise<void> {
     Logger.info(`Asserting checked: ${elementRef}`);
     const locator = await this.getLocatorWithHealing(elementRef, 'assertChecked');
@@ -538,23 +596,31 @@ export class ActionEngine {
     await this.highlightElement(locator);
   }
 
+  // Asserts the number of matching elements equals the expected count
+  // Usage: await actionEngine.assertCount("Cart.Items", 3)
   public async assertCount(elementRef: string, count: number): Promise<void> {
     Logger.info(`Asserting count ${count} for: ${elementRef}`);
     await expect(this.getLocator(elementRef)).toHaveCount(count);
   }
 
+  // Asserts the browser page title matches
+  // Usage: await actionEngine.assertPageTitle("Dashboard - MyApp")
   public async assertPageTitle(expectedTitle: string): Promise<void> {
     const resolved = this.resolveValue(expectedTitle);
     Logger.info(`Asserting page title: "${resolved}"`);
     await expect(this.page).toHaveTitle(resolved);
   }
 
+  // Asserts the current page URL contains/matches the expected pattern
+  // Usage: await actionEngine.assertPageUrl("/dashboard")
   public async assertPageUrl(expectedUrl: string): Promise<void> {
     const resolved = this.resolveValue(expectedUrl);
     Logger.info(`Asserting page URL contains: "${resolved}"`);
     await expect(this.page).toHaveURL(new RegExp(resolved));
   }
 
+  // Asserts an element has a specific HTML attribute value
+  // Usage: await actionEngine.assertAttribute("Link.Home", "href", "/home")
   public async assertAttribute(
     elementRef: string,
     attribute: string,
@@ -567,6 +633,8 @@ export class ActionEngine {
     await this.highlightElement(locator);
   }
 
+  // Gets the inner text of an element
+  // Usage: const text = await actionEngine.getText("Cart.Total")
   public async getText(elementRef: string): Promise<string> {
     const locator = await this.getLocatorWithHealing(elementRef, 'getText');
     const text = await locator.innerText();
@@ -574,6 +642,8 @@ export class ActionEngine {
     return text;
   }
 
+  // Gets an HTML attribute value from an element
+  // Usage: const href = await actionEngine.getAttribute("Nav.Logo", "href")
   public async getAttribute(elementRef: string, attribute: string): Promise<string | null> {
     const locator = await this.getLocatorWithHealing(elementRef, 'getAttribute');
     const value = await locator.getAttribute(attribute);
@@ -581,12 +651,16 @@ export class ActionEngine {
     return value;
   }
 
+  // Gets element text and stores it in DataStore for later use
+  // Usage: await actionEngine.storeText("Order.Id", "orderId")
   public async storeText(elementRef: string, variableName: string): Promise<void> {
     const text = await this.getText(elementRef);
     DataStore.set(variableName, text);
     Logger.info(`Stored text "${text}" as variable "${variableName}"`);
   }
 
+  // Gets an element's attribute and stores it in DataStore
+  // Usage: await actionEngine.storeAttribute("Link.Next", "href", "nextPageUrl")
   public async storeAttribute(
     elementRef: string,
     attribute: string,
@@ -597,6 +671,8 @@ export class ActionEngine {
     Logger.info(`Stored attribute "${attribute}" value "${value}" as variable "${variableName}"`);
   }
 
+  // Takes a screenshot of the current page and saves to reports/screenshots
+  // Usage: await actionEngine.takeScreenshot("after-login")
   public async takeScreenshot(name?: string): Promise<Buffer> {
     const screenshotName = name || `screenshot-${Date.now()}`;
     Logger.info(`Taking screenshot: ${screenshotName}`);
@@ -606,16 +682,22 @@ export class ActionEngine {
     });
   }
 
+  // Executes arbitrary JavaScript in the browser context
+  // Usage: await actionEngine.executeScript<string>("document.title")
   public async executeScript<T>(script: string, ...args: any[]): Promise<T> {
     Logger.info(`Executing script: ${script.substring(0, 80)}...`);
     return await this.page.evaluate(script, ...args) as T;
   }
 
+  // Scrolls to the bottom of the page
+  // Usage: await actionEngine.scrollToBottom()
   public async scrollToBottom(): Promise<void> {
     Logger.info('Scrolling to bottom of page');
     await this.page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
   }
 
+  // Scrolls to the top of the page
+  // Usage: await actionEngine.scrollToTop()
   public async scrollToTop(): Promise<void> {
     Logger.info('Scrolling to top of page');
     await this.page.evaluate(() => window.scrollTo(0, 0));
@@ -625,11 +707,15 @@ export class ActionEngine {
     Logger.info(`Switching to frame: ${frameLocator}`);
   }
 
+  // Accepts the next browser alert/confirm dialog
+  // Usage: await actionEngine.acceptAlert()
   public async acceptAlert(): Promise<void> {
     Logger.info('Accepting alert dialog');
     this.page.once('dialog', (dialog) => dialog.accept());
   }
 
+  // Dismisses the next browser alert/confirm dialog
+  // Usage: await actionEngine.dismissAlert()
   public async dismissAlert(): Promise<void> {
     Logger.info('Dismissing alert dialog');
     this.page.once('dialog', (dialog) => dialog.dismiss());
@@ -644,6 +730,8 @@ export class ActionEngine {
     });
   }
 
+  // Asserts an element's computed CSS color matches a named color (red, green, blue, orange)
+  // Usage: await actionEngine.assertCssColor("Error.Msg", "color", "red")
   public async assertCssColor(elementRef: string, cssProperty: string, expectedColor: string): Promise<void> {
     Logger.info(`Asserting CSS "${cssProperty}" is "${expectedColor}" on: ${elementRef}`);
     const locator = await this.getLocatorWithHealing(elementRef, 'assertCssColor');

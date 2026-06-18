@@ -54,18 +54,26 @@ const logger = winston.createLogger({
 
 // Structured logger wrapping winston for consistent test output.
 export class Logger {
+  // Logs a debug-level message (only visible when LOG_LEVEL=debug)
+  // Usage: Logger.debug("Resolved locator: #submit-btn")
   static debug(message: string): void {
     logger.debug(message);
   }
 
+  // Logs an info-level message
+  // Usage: Logger.info("Navigating to login page")
   static info(message: string): void {
     logger.info(message);
   }
 
+  // Logs a warning-level message
+  // Usage: Logger.warn("Element took longer than expected to load")
   static warn(message: string): void {
     logger.warn(message);
   }
 
+  // Logs an error message or Error object with stack trace
+  // Usage: Logger.error("Login failed") or Logger.error(new Error("timeout"))
   static error(message: string | Error): void {
     if (message instanceof Error) {
       logger.error(message.message, { stack: message.stack });
@@ -74,20 +82,28 @@ export class Logger {
     }
   }
 
+  // Logs a test step execution marker
+  // Usage: Logger.step("Click on Submit button")
   static step(stepName: string): void {
     logger.info(`▶ STEP: ${stepName}`);
   }
 
+  // Logs a scenario header with visual separator
+  // Usage: Logger.scenario("User login with valid credentials")
   static scenario(scenarioName: string): void {
     logger.info(`\n${'═'.repeat(70)}`);
     logger.info(`  SCENARIO: ${scenarioName}`);
     logger.info(`${'═'.repeat(70)}`);
   }
 
+  // Logs a passed test result
+  // Usage: Logger.testPassed("User login with valid credentials")
   static testPassed(scenarioName: string): void {
     logger.info(`✅ PASSED: ${scenarioName}`);
   }
 
+  // Logs a failed test result with optional error detail
+  // Usage: Logger.testFailed("Login test", "Element not found")
   static testFailed(scenarioName: string, error?: string): void {
     logger.error(`❌ FAILED: ${scenarioName}${error ? `\n   Error: ${error}` : ''}`);
   }

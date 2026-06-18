@@ -32,6 +32,8 @@ export class RootCauseAnalyzer {
     this._ensureReportDir();
   }
 
+  // Records a test action for context during failure analysis
+  // Usage: analyzer.recordAction("Clicked submit button")
   recordAction(action: string): void {
     this.actionHistory.push(`${new Date().toISOString()}: ${action}`);
     if (this.actionHistory.length > this.maxHistorySize) {
@@ -39,6 +41,8 @@ export class RootCauseAnalyzer {
     }
   }
 
+  // Analyzes a test failure using OpenAI and generates a root cause report
+  // Usage: const { analysis, suggestions, report } = await analyzer.analyzeFailure(failureContext)
   async analyzeFailure(
     context: TestFailureContext
   ): Promise<{ analysis: string; suggestions: string[]; report: string }> {
@@ -273,6 +277,8 @@ ${context.apiResponses
     }
   }
 
+  // Analyzes an API test failure and returns a summary with suggestions
+  // Usage: const report = await analyzer.analyzeAPIFailure("/users", 500, responseBody, "should return 200")
   async analyzeAPIFailure(
     endpoint: string,
     statusCode: number,
@@ -309,6 +315,8 @@ ${context.apiResponses
     }
   }
 
+  // Returns recurring failure patterns from past reports (for trend analysis)
+  // Usage: const patterns = analyzer.getCommonPatterns()
   getCommonPatterns(): { pattern: string; count: number }[] {
     const reports = fs.readdirSync(this.failureReportDir);
     const patterns: Map<string, number> = new Map();
@@ -334,6 +342,8 @@ ${context.apiResponses
       .sort((a, b) => b.count - a.count);
   }
 
+  // Clears the recorded action history
+  // Usage: analyzer.clearHistory()
   clearHistory(): void {
     this.actionHistory = [];
     Logger.debug('Action history cleared');

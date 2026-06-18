@@ -162,6 +162,8 @@ export class ApiEngine {
   // HTTP Methods
   // ───────────────────────────────────────────────────────────────────────────
 
+  // Sends a GET request to the endpoint and stores the response
+  // Usage: await apiEngine.get("/users/1")
   public async get(endpoint: string, options?: ApiRequestOptions): Promise<ApiResponseContext> {
     const url = this.resolveString(endpoint);
     const start = Date.now();
@@ -169,6 +171,8 @@ export class ApiEngine {
     return this.storeResponse(response, start);
   }
 
+  // Sends a POST request with optional body and stores the response
+  // Usage: await apiEngine.post("/users", { body: { name: "John" } })
   public async post(endpoint: string, options?: ApiRequestOptions): Promise<ApiResponseContext> {
     const url = this.resolveString(endpoint);
     const body = options?.body ? this.resolveObject(options.body) : undefined;
@@ -177,6 +181,8 @@ export class ApiEngine {
     return this.storeResponse(response, start);
   }
 
+  // Sends a PUT request with optional body and stores the response
+  // Usage: await apiEngine.put("/users/1", { body: { name: "Updated" } })
   public async put(endpoint: string, options?: ApiRequestOptions): Promise<ApiResponseContext> {
     const url = this.resolveString(endpoint);
     const body = options?.body ? this.resolveObject(options.body) : undefined;
@@ -185,6 +191,8 @@ export class ApiEngine {
     return this.storeResponse(response, start);
   }
 
+  // Sends a PATCH request with optional body and stores the response
+  // Usage: await apiEngine.patch("/users/1", { body: { name: "Patched" } })
   public async patch(endpoint: string, options?: ApiRequestOptions): Promise<ApiResponseContext> {
     const url = this.resolveString(endpoint);
     const body = options?.body ? this.resolveObject(options.body) : undefined;
@@ -193,6 +201,8 @@ export class ApiEngine {
     return this.storeResponse(response, start);
   }
 
+  // Sends a DELETE request and stores the response
+  // Usage: await apiEngine.delete("/users/1")
   public async delete(endpoint: string, options?: ApiRequestOptions): Promise<ApiResponseContext> {
     const url = this.resolveString(endpoint);
     const start = Date.now();
@@ -218,6 +228,8 @@ export class ApiEngine {
     return ctx;
   }
 
+  // Returns the most recent API response (throws if no request was made)
+  // Usage: const resp = apiEngine.getLastResponse()
   public getLastResponse(): ApiResponseContext {
     if (!this.lastResponse) {
       throw new Error('No API response stored. Make sure a request was made first.');
@@ -229,16 +241,22 @@ export class ApiEngine {
   // Authentication Helpers
   // ───────────────────────────────────────────────────────────────────────────
 
+  // Sets a Bearer token for all subsequent requests
+  // Usage: apiEngine.setAuthToken("eyJhbGciOiJI...")
   public setAuthToken(token: string): void {
     this.client.defaults.headers.common['Authorization'] = `Bearer ${token}`;
     Logger.info('Bearer token set on API client');
   }
 
+  // Sets an API key header for all subsequent requests
+  // Usage: apiEngine.setApiKey("my-key-123", "x-api-key")
   public setApiKey(key: string, headerName: string = 'x-api-key'): void {
     this.client.defaults.headers.common[headerName] = key;
     Logger.info(`API key set on header: ${headerName}`);
   }
 
+  // Removes the Authorization header from the client
+  // Usage: apiEngine.clearAuth()
   public clearAuth(): void {
     delete this.client.defaults.headers.common['Authorization'];
     Logger.info('Authorization header removed');
@@ -248,6 +266,8 @@ export class ApiEngine {
   // JSON Body Builder (for feature file table-driven requests)
   // ───────────────────────────────────────────────────────────────────────────
 
+  // Converts a Cucumber DataTable to a key-value object for request bodies
+  // Usage: const body = ApiEngine.tableToObject(table)
   public static tableToObject(table: { rawTable: string[][] }): Record<string, unknown> {
     const result: Record<string, unknown> = {};
     const [headers, ...rows] = table.rawTable;

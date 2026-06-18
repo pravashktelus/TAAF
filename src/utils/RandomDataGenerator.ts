@@ -4,6 +4,8 @@ import { faker } from '@faker-js/faker';
 export class RandomDataGenerator {
   private static generatedValues: Map<string, string> = new Map();
 
+  // Replaces all ##FieldName placeholders in a string with random data
+  // Usage: RandomDataGenerator.resolve("Hi ##FirstName, email: ##Email")
   static resolve(value: string): string {
     return value.replace(/##(\w+)/g, (_, field) => {
       const generated = this.generate(field);
@@ -12,6 +14,8 @@ export class RandomDataGenerator {
     });
   }
 
+  // Generates a single random value for the given field type (FirstName, Email, MobileNum, etc.)
+  // Usage: RandomDataGenerator.generate("Email") → "jane@example.com"
   static generate(field: string): string {
     switch (field) {
       case 'FirstName':
@@ -59,10 +63,14 @@ export class RandomDataGenerator {
     }
   }
 
+  // Retrieves the last generated value for a specific field (for later verification)
+  // Usage: const email = RandomDataGenerator.getLastGenerated("Email")
   static getLastGenerated(field: string): string | undefined {
     return this.generatedValues.get(field);
   }
 
+  // Clears all stored generated values (called between scenarios)
+  // Usage: RandomDataGenerator.clear()
   static clear(): void {
     this.generatedValues.clear();
   }

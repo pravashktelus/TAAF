@@ -14,10 +14,8 @@ import * as path from 'path';
 export class TestDataLoader {
   private static readonly DATA_DIR = path.resolve(__dirname, '../../testdata');
 
-  /**
-   * Load a test data file. Environment-specific file takes precedence.
-   * @param datasetName  e.g. "users" → loads testdata/users.qa.json or testdata/users.json
-   */
+  // Loads a JSON test data file (env-specific file takes priority over base file)
+  // Usage: const users = TestDataLoader.load<UserData>("users")
   public static load<T = Record<string, unknown>>(datasetName: string): T {
     const env = process.env.ENV || 'qa';
     const envFile = path.join(this.DATA_DIR, `${datasetName}.${env}.json`);
@@ -36,9 +34,8 @@ export class TestDataLoader {
     return JSON.parse(content) as T;
   }
 
-  /**
-   * Get a specific field from a dataset.
-   */
+  // Gets a specific field from a dataset by key
+  // Usage: const email = TestDataLoader.get<string>("users", "adminEmail")
   public static get<T = unknown>(datasetName: string, key: string): T {
     const data = this.load<Record<string, unknown>>(datasetName);
     if (!(key in data)) {

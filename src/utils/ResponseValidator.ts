@@ -18,6 +18,8 @@ export class ResponseValidator {
   // Status
   // ───────────────────────────────────────────────────────────────────────────
 
+  // Asserts the response status code matches exactly
+  // Usage: validator.assertStatus(200)
   assertStatus(expectedStatus: number): void {
     Logger.info(`Asserting response status: ${expectedStatus}`);
     if (this.response.status !== expectedStatus) {
@@ -28,6 +30,8 @@ export class ResponseValidator {
     }
   }
 
+  // Asserts the response status code falls within a range (inclusive)
+  // Usage: validator.assertStatusRange(200, 299)
   assertStatusRange(min: number, max: number): void {
     Logger.info(`Asserting response status in range: ${min}-${max}`);
     if (this.response.status < min || this.response.status > max) {
@@ -41,6 +45,8 @@ export class ResponseValidator {
   // Headers
   // ───────────────────────────────────────────────────────────────────────────
 
+  // Asserts a response header has the expected value
+  // Usage: validator.assertHeader("content-type", "application/json")
   assertHeader(headerName: string, expectedValue: string): void {
     Logger.info(`Asserting header "${headerName}": "${expectedValue}"`);
     const actual = this.response.headers[headerName.toLowerCase()];
@@ -51,6 +57,8 @@ export class ResponseValidator {
     }
   }
 
+  // Asserts a response header exists (regardless of value)
+  // Usage: validator.assertHeaderExists("x-request-id")
   assertHeaderExists(headerName: string): void {
     if (!(headerName.toLowerCase() in this.response.headers)) {
       throw new Error(`Expected header "${headerName}" to be present in response`);
@@ -61,9 +69,8 @@ export class ResponseValidator {
   // Body
   // ───────────────────────────────────────────────────────────────────────────
 
-  /**
-   * Get a nested field value using dot notation: "data.first_name"
-   */
+  // Gets a nested field value from response body using dot notation
+  // Usage: validator.getField("data.user.email")
   getField(fieldPath: string): unknown {
     const parts = fieldPath.split('.');
     let current: unknown = this.response.body;
@@ -79,6 +86,8 @@ export class ResponseValidator {
     return current;
   }
 
+  // Asserts a body field equals the expected value (supports dot notation)
+  // Usage: validator.assertField("data.name", "John")
   assertField(fieldPath: string, expectedValue: unknown): void {
     Logger.info(`Asserting body field "${fieldPath}" equals "${expectedValue}"`);
     const actual = this.getField(fieldPath);
@@ -94,6 +103,8 @@ export class ResponseValidator {
     }
   }
 
+  // Asserts a body field contains a substring
+  // Usage: validator.assertFieldContains("data.message", "success")
   assertFieldContains(fieldPath: string, expectedSubstring: string): void {
     Logger.info(`Asserting body field "${fieldPath}" contains "${expectedSubstring}"`);
     const actual = String(this.getField(fieldPath));
@@ -104,6 +115,8 @@ export class ResponseValidator {
     }
   }
 
+  // Asserts a body field exists (not null/undefined)
+  // Usage: validator.assertFieldExists("data.id")
   assertFieldExists(fieldPath: string): void {
     Logger.info(`Asserting body field "${fieldPath}" exists`);
     const value = this.getField(fieldPath);
@@ -112,6 +125,8 @@ export class ResponseValidator {
     }
   }
 
+  // Asserts a body field is not empty (not null, undefined, or "")
+  // Usage: validator.assertFieldNotEmpty("data.token")
   assertFieldNotEmpty(fieldPath: string): void {
     Logger.info(`Asserting body field "${fieldPath}" is not empty`);
     const value = this.getField(fieldPath);
@@ -120,6 +135,8 @@ export class ResponseValidator {
     }
   }
 
+  // Asserts an array field has a specific length
+  // Usage: validator.assertArrayLength("data.items", 5)
   assertArrayLength(fieldPath: string, expectedLength: number): void {
     Logger.info(`Asserting array at "${fieldPath}" has length ${expectedLength}`);
     const arr = this.getField(fieldPath);
@@ -133,6 +150,8 @@ export class ResponseValidator {
     }
   }
 
+  // Asserts an array field is not empty
+  // Usage: validator.assertArrayNotEmpty("data.results")
   assertArrayNotEmpty(fieldPath: string): void {
     Logger.info(`Asserting array at "${fieldPath}" is not empty`);
     const arr = this.getField(fieldPath);
@@ -145,6 +164,8 @@ export class ResponseValidator {
   // Response Time
   // ───────────────────────────────────────────────────────────────────────────
 
+  // Asserts the API response time is below a threshold in milliseconds
+  // Usage: validator.assertResponseTimeLessThan(3000)
   assertResponseTimeLessThan(maxMs: number): void {
     Logger.info(`Asserting response time < ${maxMs}ms (actual: ${this.response.responseTime}ms)`);
     if (this.response.responseTime >= maxMs) {

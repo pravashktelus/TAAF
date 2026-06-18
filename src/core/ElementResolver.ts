@@ -14,6 +14,8 @@ export class ElementResolver {
     '../pages/properties'
   );
 
+  // Resolves "PageName.ElementKey" to its locator string from the .properties file
+  // Usage: ElementResolver.resolve("LoginPage.EmailInput") → "#email"
   public static resolve(reference: string): string {
     const parts = reference.split('.');
     if (parts.length < 2) {
@@ -39,6 +41,8 @@ export class ElementResolver {
     return locator;
   }
 
+  // Loads and parses a .properties file for the given page name (cached)
+  // Usage: const props = ElementResolver.loadPage("LoginPage")
   public static loadPage(pageName: string): Record<string, string> {
     if (this.cache.has(pageName)) {
       return this.cache.get(pageName)!;
@@ -82,6 +86,8 @@ export class ElementResolver {
     return result;
   }
 
+  // Lists all available page names (from .properties files in the directory)
+  // Usage: ElementResolver.listAvailablePages() → ["LoginPage", "Dashboard"]
   public static listAvailablePages(): string[] {
     if (!fs.existsSync(this.PROPERTIES_DIR)) return [];
     return fs
@@ -90,6 +96,8 @@ export class ElementResolver {
       .map((f) => f.replace('.properties', ''));
   }
 
+  // Clears the internal cache (forces reload of .properties files on next access)
+  // Usage: ElementResolver.clearCache()
   public static clearCache(): void {
     this.cache.clear();
   }

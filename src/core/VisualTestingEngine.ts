@@ -23,9 +23,8 @@ export class VisualTestingEngine {
     this._ensureDirectories();
   }
 
-  /**
-   * Capture full page screenshot
-   */
+  // Captures a full-page screenshot and saves to reports/screenshots
+  // Usage: const path = await visualEngine.captureFullPage("login-page")
   async captureFullPage(testName: string): Promise<string> {
     try {
       const filename = `${testName}_${Date.now()}.png`;
@@ -40,9 +39,8 @@ export class VisualTestingEngine {
     }
   }
 
-  /**
-   * Capture element screenshot
-   */
+  // Captures a screenshot of a specific element
+  // Usage: const path = await visualEngine.captureElement("#login-form", "form-capture")
   async captureElement(elementSelector: string, testName: string): Promise<string> {
     try {
       const element = this.page.locator(elementSelector);
@@ -58,9 +56,8 @@ export class VisualTestingEngine {
     }
   }
 
-  /**
-   * Analyze screenshot for visual issues using OpenAI
-   */
+  // Analyzes a screenshot using OpenAI to detect visual issues
+  // Usage: const report = await visualEngine.analyzeScreenshotForIssues("path/to/img.png", "checkout page")
   async analyzeScreenshotForIssues(
     screenshotPath: string,
     context: string = ''
@@ -76,9 +73,8 @@ export class VisualTestingEngine {
     }
   }
 
-  /**
-   * Visual regression test - compare with baseline
-   */
+  // Compares a screenshot against a baseline using OpenAI (creates baseline on first run)
+  // Usage: const result = await visualEngine.visualRegressionTest("current.png", "login-test")
   async visualRegressionTest(
     currentScreenshotPath: string,
     testName: string,
@@ -129,9 +125,8 @@ export class VisualTestingEngine {
     }
   }
 
-  /**
-   * Detect visual anomalies in screenshot
-   */
+  // Detects visual anomalies in a screenshot using OpenAI
+  // Usage: const issues = await visualEngine.detectAnomalies("path/to/screenshot.png")
   async detectAnomalies(screenshotPath: string): Promise<string[]> {
     try {
       const imageBase64 = await this._readImageAsBase64(screenshotPath);
@@ -152,9 +147,8 @@ export class VisualTestingEngine {
     }
   }
 
-  /**
-   * Crop image to specific region for testing
-   */
+  // Crops an image to a specific rectangular region
+  // Usage: const cropped = await visualEngine.cropImage("full.png", 0, 0, 300, 200)
   async cropImage(
     screenshotPath: string,
     x: number,
@@ -178,9 +172,8 @@ export class VisualTestingEngine {
     }
   }
 
-  /**
-   * Convert image to grayscale for comparison (removes color variations)
-   */
+  // Converts an image to grayscale (removes color variations for comparison)
+  // Usage: const grayPath = await visualEngine.toGrayscale("screenshot.png")
   async toGrayscale(screenshotPath: string): Promise<string> {
     try {
       const filename = `grayscale_${Date.now()}.png`;
@@ -198,9 +191,8 @@ export class VisualTestingEngine {
     }
   }
 
-  /**
-   * Compare two images pixel-by-pixel
-   */
+  // Compares two images pixel-by-pixel and returns difference percentage
+  // Usage: const { identical, diffPercentage } = await visualEngine.pixelPerfectCompare("img1.png", "img2.png")
   async pixelPerfectCompare(
     image1Path: string,
     image2Path: string
@@ -263,9 +255,8 @@ export class VisualTestingEngine {
     }
   }
 
-  /**
-   * Create visual diff overlay
-   */
+  // Creates a side-by-side visual diff image from baseline and current screenshots
+  // Usage: const diffPath = await visualEngine.createDiffOverlay("baseline.png", "current.png")
   async createDiffOverlay(
     baselinePath: string,
     currentPath: string

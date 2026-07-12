@@ -19,6 +19,9 @@ import { PlanFormatter } from '../planner/PlanFormatter';
 import { PropertiesWriter } from '../generator/PropertiesWriter';
 import { FeatureWriter } from '../generator/FeatureWriter';
 import { GeneratePrompts } from '../generator/GeneratePrompts';
+import { ReportReader } from '../healer/ReportReader';
+import { FailureClassifier } from '../healer/FailureClassifier';
+import { HealingReportWriter } from '../healer/HealingReportWriter';
 
 let passed = 0;
 let failed = 0;
@@ -412,6 +415,157 @@ async function testPageCrawlerLiveCrawl(): Promise<void> {
   }
 }
 
+// ─── Phase 4: ReportReader ────────────────────────────────────────────────────
+async function testReportReader(): Promise<void> {
+  console.log('\n[Test 13] ReportReader — reads cucumber report');
+
+  const reader = new ReportReader();
+
+  // Test with real report
+  const reportPath = path.resolve(process.cwd(), 'reports', 'cucumber-json', 'cucumber-report.json');
+  if (!fs.existsSync(reportPath)) {
+    console.warn('  ⚠️  SKIP: No cucumber-report.json found. Run npm test first.');
+    return;
+  }
+
+  const summary = reader.read(reportPath);
+  assert(typeof summary.totalScenarios === 'number', `totalScenarios is number: ${summary.totalScenarios}`);
+  assert(summary.totalScenarios > 0, `totalScenarios > 0: ${summary.totalScenarios}`);
+  assert(Array.isArray(summary.scenarios), 'scenarios is array');
+  assert(Array.isArray(summary.healedElements), 'healedElements is array');
+  assert(typeof summary.runDate === 'string', 'runDate is string');
+  assert(
+    summary.passed + summary.failed + summary.skipped === summary.totalScenarios,
+    `counts add up: ${summary.passed}+${summary.failed}+${summary.skipped}=${summary.totalScenarios}`
+  );
+  console.log(`  ℹ️  ${summary.totalScenarios} scenarios, ${summary.healedElements.length} healed elements`);
+}
+
+// ─── Phase 4: FailureClassifier ───────────────────────────────────────────────
+async function testFailureClassifier(): Promise<void> {
+  console.log('\n[Test 14] FailureClassifier — classifies failures correctly');
+
+  const classifier = new FailureClassifier();
+
+  // Mock summary with various failure types
+  const mockSummary = {
+    totalScenarios: 4,
+    passed: 1,
+    failed: 3,
+    skipped: 0,
+    runDate: new Date().toISOString(),
+    healedElements: [
+      { elementRef: 'TeleConnect.BtnNewConnection', pageName: 'TeleConnect', elementKey: 'BtnNewConnection', screenshotPath: 'reports/screenshots/healed_TeleConnect_BtnNewConnection_123.png' }
+    ],
+    scenarios: [
+      // Passed scenario
+      {
+        id: 'tc-001', name: 'Register new account', featureFile: 'features/web/1_teleconnect.feature',
+        status: 'passed' as const, steps: [{ keyword: 'Given', name: 'I navigate', status: 'passed' as const }],
+        tags: ['@smoke'], duration: 5000
+      },
+      // App fault - assertion failure
+      {
+        id: 'tc-002', name: 'Verify ticket status', featureFile: 'features/web/6_customersupport.feature',
+        status: 'failed' as const,
+        steps: [{ keyword: 'Then', name: 'status should have text OPEN', status: 'failed' as const,
+          errorMessage: 'expect(locator).toHaveText() failed\nExpected: "OPEN"\nReceived: ""' }],
+        failedStep: { keyword: 'Then', name: 'status should have text OPEN', status: 'failed' as const,
+          errorMessage: 'expect(locator).toHaveText() failed\nExpected: "OPEN"\nReceived: ""' },
+        tags: ['@smoke'], duration: 3000
+      },
+      // Test fault - locator timeout
+      {
+        id: 'tc-003', name: 'Click support button', featureFile: 'features/web/6_customersupport.feature',
+        status: 'failed' as const,
+        steps: [{ keyword: 'When', name: "I click 'CustomerSupport.BtnSupport'", status: 'failed' as const,
+          errorMessage: 'Timeout 30000ms exceeded waiting for locator' }],
+        failedStep: { keyword: 'When', name: "I click 'CustomerSupport.BtnSupport'", status: 'failed' as const,
+          errorMessage: 'Timeout 30000ms exceeded waiting for locator' },
+        tags: ['@smoke'], duration: 30000
+      },
+      // Passed but healed
+      {
+        id: 'tc-004', name: 'Place new order', featureFile: 'features/web/1_teleconnect.feature',
+        status: 'passed' as const,
+        steps: [{ keyword: 'When', name: "I click 'TeleConnect.BtnNewConnection'", status: 'passed' as const }],
+        tags: ['@smoke'], duration: 8000
+      },
+    ]
+  };
+
+  const classifications = await classifier.classifyAll(mockSummary as any);
+
+  assert(classifications.length === 4, `4 classifications returned: ${classifications.length}`);
+
+  const passed = classifications.find((c) => c.scenarioName === 'Register new account');
+  assert(passed?.classification === 'passed', `passed scenario classified as passed: ${passed?.classification}`);
+
+  const appFault = classifications.find((c) => c.scenarioName === 'Verify ticket status');
+  assert(appFault?.classification === 'app_fault', `assertion failure → app_fault: ${appFault?.classification}`);
+
+  const testFault = classifications.find((c) => c.scenarioName === 'Click support button');
+  assert(testFault?.classification === 'test_fault', `timeout → test_fault: ${testFault?.classification}`);
+
+  const healed = classifications.find((c) => c.scenarioName === 'Place new order');
+  assert(healed?.classification === 'healed', `passed with healed element → healed: ${healed?.classification}`);
+}
+
+// ─── Phase 4: HealingReportWriter ────────────────────────────────────────────
+async function testHealingReportWriter(): Promise<void> {
+  console.log('\n[Test 15] HealingReportWriter — writes healing reports');
+
+  const mockClassifications = [
+    {
+      scenarioName: 'Verify ticket status',
+      featureFile: 'features/web/6_customersupport.feature',
+      status: 'failed' as const,
+      classification: 'app_fault' as const,
+      confidence: 'high' as const,
+      reason: 'Assertion failed — wrong value',
+      action: '🐛 Raise a defect',
+      failedStep: "Then 'CustomerSupport.TicketStatus' should have text 'OPEN'",
+      errorMessage: 'Expected OPEN received empty',
+    },
+    {
+      scenarioName: 'Register new account',
+      featureFile: 'features/web/1_teleconnect.feature',
+      status: 'passed' as const,
+      classification: 'passed' as const,
+      confidence: 'high' as const,
+      reason: 'Scenario passed successfully.',
+      action: 'No action needed.',
+    },
+  ];
+
+  const mockSummary = {
+    totalScenarios: 2, passed: 1, failed: 1, skipped: 0,
+    runDate: new Date().toISOString(),
+    healedElements: [],
+    scenarios: [],
+  };
+
+  const writer = new HealingReportWriter();
+  const { mdPath, jsonPath } = writer.write(mockClassifications as any, mockSummary as any);
+
+  assert(fs.existsSync(mdPath), `MD report created: ${mdPath}`);
+  assert(fs.existsSync(jsonPath), `JSON report created: ${jsonPath}`);
+
+  const md = fs.readFileSync(mdPath, 'utf-8');
+  assert(md.includes('Healing Report'), 'MD includes report header');
+  assert(md.includes('APP BUG'), 'MD includes app fault classification');
+  assert(md.includes('Verify ticket status'), 'MD includes scenario name');
+  assert(md.includes('No Action Needed'), 'MD includes passed section');
+
+  const json = JSON.parse(fs.readFileSync(jsonPath, 'utf-8'));
+  assert(json.summary.appFaults === 1, `JSON has 1 app fault: ${json.summary.appFaults}`);
+  assert(json.classifications.length === 2, `JSON has 2 classifications: ${json.classifications.length}`);
+
+  // Cleanup
+  fs.unlinkSync(mdPath);
+  fs.unlinkSync(jsonPath);
+}
+
 // ─── Run All ──────────────────────────────────────────────────────────────────
 async function runAll(): Promise<void> {
   console.log('═══════════════════════════════════════════');
@@ -430,6 +584,9 @@ async function runAll(): Promise<void> {
   await testPropertiesWriter();
   await testFeatureWriter();
   await testGeneratePrompts();
+  await testReportReader();
+  await testFailureClassifier();
+  await testHealingReportWriter();
   await testPageCrawlerLiveCrawl();
 
   console.log('\n═══════════════════════════════════════════');

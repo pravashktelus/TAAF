@@ -11,6 +11,9 @@ dist/
 reports/
 test-results/
 
+# Agent-generated artifacts (review copies — not for source control)
+generated/
+
 # Screenshots & videos (generated at runtime)
 *.png
 *.mp4

@@ -5,7 +5,11 @@
   "scripts": {
     "test": "cucumber-js",
     "report": "node -e \"const fs=require('fs'),p=require('path');const d=p.join('reports','html');if(fs.existsSync(d))fs.rmSync(d,{recursive:true});fs.mkdirSync(p.join('reports','cucumber-json'),{recursive:true})\" && node src/utils/GenerateReport.js",
-    "clean": "node -e \"const fs=require('fs');['reports','test-results'].forEach(d=>{if(fs.existsSync(d))fs.rmSync(d,{recursive:true})})\""
+    "clean": "node -e \"const fs=require('fs');['reports','test-results'].forEach(d=>{if(fs.existsSync(d))fs.rmSync(d,{recursive:true})})\"",
+    "agent:plan": "ts-node src/agents/planner/PlannerAgent.ts",
+    "agent:generate": "ts-node src/agents/generator/GeneratorAgent.ts",
+    "agent:heal": "ts-node src/agents/healer/HealerAgent.ts",
+    "agent:test": "ts-node src/agents/tests/phase1.test.ts"
   },
   "dependencies": {
     "@apidevtools/json-schema-ref-parser": "^11.7.3",
@@ -15,6 +19,7 @@
     "ajv": "^8.16.0",
     "axios": "^1.7.2",
     "dotenv": "^16.4.5",
+    "mammoth": "^1.12.0",
     "multiple-cucumber-html-reporter": "^3.7.0",
     "openai": "^4.52.0",
     "playwright": "^1.60.0",
@@ -23,7 +28,8 @@
     "sharp": "^0.33.0",
     "ts-node": "^10.9.2",
     "typescript": "^5.4.5",
-    "winston": "^3.13.0"
+    "winston": "^3.13.0",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@types/node": "^20.12.12",

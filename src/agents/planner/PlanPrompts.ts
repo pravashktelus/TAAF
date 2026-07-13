@@ -118,9 +118,20 @@ ${this._getOutputSchema(pageName)}`);
     sections.push(`
 === YOUR TASK ===
 Parse the existing test cases above and reformat them for the "${pageName}" page.
-Do NOT add new test cases or modify existing ones — preserve all original test cases exactly.
-Map each test case to the output structure below.
-If navigation or test data is missing for a step, leave it as empty string.
+
+CRITICAL RULES FOR TESTCASES MODE:
+- PRESERVE EVERY SINGLE STEP exactly as provided — including login steps, navigation steps, ALL steps
+- Do NOT skip any step (login, navigate, click, enter, verify — ALL must appear)
+- Do NOT add any new test cases — only structure what is provided
+- Do NOT generate negative, edge case, or additional scenarios
+- Do NOT modify test data values — use exactly what was provided (emails, passwords, text etc.)
+- Do NOT add edgeCases — leave the edgeCases array empty []
+- Do NOT split one test case into multiple — if input has 1 test case with 15 steps, output has 1 test case with 15 steps
+- Total output test cases MUST equal the number of test cases in the input — no more, no less
+- Total steps per test case MUST match the input — no more, no less
+- If the input has login steps (enter email, enter password, click sign in) — INCLUDE THEM
+- Use test data values EXACTLY as provided: emails, passwords, field values
+- Map step action text to the closest element name from the available references
 
 Return ONLY this JSON structure (no markdown, no extra text):
 ${this._getOutputSchema(pageName)}`);

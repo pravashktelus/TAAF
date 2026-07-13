@@ -193,13 +193,47 @@ async function run(): Promise<void> {
 
     let prompt: string;
     let fallback: string;
+    let aiResponse: string;
 
-    if (inputMode === 'testcases' && storyInput) {
+    if (inputMode === 'testcases' && storyInput && storyInput.testCases.length > 0) {
+      // ── TESTCASES MODE (structured XLS with standard columns): Skip AI ─────
+      console.log(`[PlannerAgent] Testcases mode: using ${storyInput.testCases.length} parsed test case(s) directly (no AI modification)`);
+
+      const directOutput = JSON.stringify({
+        page,
+        url: pageSnapshot?.url || '',
+        mode: 'testcases',
+        aiGenerated: false,
+        elements: pageSnapshot?.elements || [],
+        testCases: storyInput.testCases.map((tc) => ({
+          id: tc.id,
+          title: tc.title,
+          type: 'happy_path',
+          navigation: tc.steps.map((s) => s.navigation).filter(Boolean).join(' → ') || '',
+          steps: tc.steps,
+          edgeCases: [],
+        })),
+      }, null, 2);
+
+      aiResponse = directOutput;
+
+    } else if (inputMode === 'testcases' && storyInput) {
+      // ── TESTCASES MODE (free-form/document-style XLS): AI structures it ────
+      // AI's job is ONLY to structure into JSON — NOT modify, split, or skip steps
       prompt = PlanPrompts.buildTestCasesPrompt(storyInput, page, pageSnapshot, frameworkContext);
       fallback = PlanPrompts.buildTestCasesFallback(page, storyInput, pageSnapshot);
+
+      console.log(`[PlannerAgent] Sending to ${config.aiEnabled ? config.aiProvider : 'fallback'}...`);
+      aiResponse = await LLMClient.askWithSystem(PlanPrompts.SYSTEM_PROMPT, prompt, fallback);
+
     } else if (storyInput) {
+      // Story mode — AI generates test cases
       prompt = PlanPrompts.buildStoryPrompt(storyInput, page, pageSnapshot, frameworkContext);
       fallback = PlanPrompts.buildStoryFallback(page, pageSnapshot);
+
+      console.log(`[PlannerAgent] Sending to ${config.aiEnabled ? config.aiProvider : 'fallback'}...`);
+      aiResponse = await LLMClient.askWithSystem(PlanPrompts.SYSTEM_PROMPT, prompt, fallback);
+
     } else {
       // URL only — story mode with no input file
       prompt = PlanPrompts.buildStoryPrompt(
@@ -209,19 +243,13 @@ async function run(): Promise<void> {
         frameworkContext
       );
       fallback = PlanPrompts.buildStoryFallback(page, pageSnapshot);
+
+      console.log(`[PlannerAgent] Sending to ${config.aiEnabled ? config.aiProvider : 'fallback'}...`);
+      aiResponse = await LLMClient.askWithSystem(PlanPrompts.SYSTEM_PROMPT, prompt, fallback);
     }
 
-    // ── Step 4: Call AI ─────────────────────────────────────────────────────
-    console.log(`[PlannerAgent] Sending to ${config.aiEnabled ? config.aiProvider : 'fallback'}...`);
-
-    const aiResponse = await LLMClient.askWithSystem(
-      PlanPrompts.SYSTEM_PROMPT,
-      prompt,
-      fallback
-    );
-
-    const isAIResponse = aiResponse !== fallback && aiResponse.length > 0;
-    console.log(`[PlannerAgent] Response received (${isAIResponse ? 'AI-generated' : 'fallback template'})`);
+    const isAIResponse = aiResponse.includes('"aiGenerated": true') || aiResponse.includes('"aiGenerated":true');
+    console.log(`[PlannerAgent] Response ready (${isAIResponse ? 'AI-generated' : 'direct/fallback'})`);
 
     // ── Step 5: Format and write output files ───────────────────────────────
     const sourceFile = args.story || args.testcases || url || 'unknown';

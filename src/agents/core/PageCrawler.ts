@@ -1,5 +1,7 @@
 import { chromium, firefox, webkit, Browser, Page, BrowserContext } from 'playwright';
 import { AgentsConfig } from '../config/AgentsConfig';
+import * as fs from 'fs';
+import * as path from 'path';
 
 /**
  * Represents a single interactive element discovered on a page.
@@ -100,9 +102,11 @@ export class PageCrawler {
 
     const username = process.env.TEST_USERNAME
       || process.env.TEST_EMAIL
+      || this._getStoredCredential('Email')
       || this.config.testUserEmail;
 
     const password = process.env.TEST_PASSWORD
+      || this._getStoredCredential('Password')
       || this.config.testUserPassword;
 
     if (!username || !password) {
@@ -698,6 +702,56 @@ export class PageCrawler {
    */
   getPage(): Page | null {
     return this.page;
+  }
+
+  /**
+   * Logs in and then navigates to a target URL.
+   * Use when the target page requires authentication.
+   * Returns the snapshot of the TARGET page (not the login page).
+   *
+   * Usage: const snapshot = await crawler.loginAndNavigate('https://app.com/orders')
+   */
+  async loginAndNavigate(targetUrl: string): Promise<PageSnapshot> {
+    if (!this.page) {
+      throw new Error('[PageCrawler] Browser not launched. Call launch() first.');
+    }
+
+    // Step 1: Login
+    await this.login();
+
+    // Step 2: Wait for post-login navigation to settle
+    await this.page.waitForTimeout(1500);
+    const postLoginUrl = this.page.url();
+    console.log(`[PageCrawler] Post-login URL: ${postLoginUrl}`);
+
+    // Step 3: Navigate to target URL
+    console.log(`[PageCrawler] Navigating to target: ${targetUrl}`);
+    await this.page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await this.page.waitForTimeout(2000); // allow dynamic content to render
+
+    // Step 4: Verify we're actually on the target page (not redirected back to login)
+    const currentUrl = this.page.url();
+    if (currentUrl.includes('login') || currentUrl.includes('signin')) {
+      console.warn(`[PageCrawler] ⚠️  Still on login page after login attempt. Credentials may be invalid.`);
+      console.warn(`[PageCrawler] ⚠️  Current URL: ${currentUrl}`);
+    }
+
+    // Step 5: Capture the target page snapshot
+    return this.snapshotCurrentPage();
+  }
+
+  /**
+   * Reads credentials from testdata/runtime-store.json (persisted from previous test runs).
+   */
+  private _getStoredCredential(key: string): string {
+    try {
+      const storePath = path.resolve(process.cwd(), 'testdata', 'runtime-store.json');
+      if (!fs.existsSync(storePath)) return '';
+      const store = JSON.parse(fs.readFileSync(storePath, 'utf-8'));
+      return store[key] || '';
+    } catch {
+      return '';
+    }
   }
 
   /**

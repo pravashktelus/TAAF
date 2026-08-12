@@ -216,30 +216,31 @@ async function run(): Promise<void> {
         const snapshot = await crawler.crawl(url);
 
         // Detect login redirect — if crawled URL differs from intended URL
+        // OR if page title/content indicates login page despite URL match
         const intendedHost = new URL(url).hostname;
         const crawledUrl = snapshot.url;
+        const isLoginPage = snapshot.elements.some((el) =>
+          el.locator.includes('login-email') || el.locator.includes('login-password') || el.locator.includes('login-submit')
+        );
         const isRedirectedToLogin =
-          crawledUrl !== url &&
-          (crawledUrl.includes('login') || crawledUrl.includes('signin') || !crawledUrl.includes(intendedHost));
+          isLoginPage && !url.includes('login') && !url.includes('signin');
 
         if (isRedirectedToLogin) {
-          console.warn(`[GeneratorAgent] ⚠️  Page requires login — redirected to: ${crawledUrl}`);
-          console.warn(`[GeneratorAgent] ⚠️  Attempting step-replay using test case data...`);
+          console.warn(`[GeneratorAgent] ⚠️  Page requires login — got login form at: ${crawledUrl}`);
+          console.log(`[GeneratorAgent] Auto-login and re-navigate to target: ${url}`);
 
-          // Step-replay: use test case steps to navigate the app
-          if (plan.testCases.length > 0 && plan.testCases[0].steps.length > 0) {
-            const steps = plan.testCases[0].steps.map((s) => ({
-              action: s.action,
-              testData: s.testData,
-              expected: s.expected,
-            }));
+          // Use loginAndNavigate to authenticate and reach the target page
+          const targetSnapshot = await crawler.loginAndNavigate(url);
+          const targetUrl = targetSnapshot.url;
 
-            const replaySnapshots = await crawler.replaySteps(steps, crawledUrl);
-            replaySnapshots.forEach((snap, i) => {
-              const pageName = _pageNameFromUrl(snap.url);
-              crawledSnapshots.set(pageName, snap);
-              console.log(`[GeneratorAgent] → Replay snapshot ${i + 1}: ${snap.elements.length} elements on ${pageName} (${snap.url})`);
-            });
+          // Check if we successfully reached the target (not still on login)
+          if (targetUrl.includes('login') || targetUrl.includes('signin')) {
+            console.warn(`[GeneratorAgent] ⚠️  Login failed — could not reach ${url}`);
+            console.warn(`[GeneratorAgent] ⚠️  Credentials may be invalid. Check testdata/runtime-store.json or framework.properties`);
+          } else {
+            const pageName = plan.page;
+            crawledSnapshots.set(pageName, targetSnapshot);
+            console.log(`[GeneratorAgent] ✅ Reached target page: ${targetUrl} → ${targetSnapshot.elements.length} elements on ${pageName}`);
           }
           continue;
         }
@@ -251,35 +252,24 @@ async function run(): Promise<void> {
     } finally {
       if (crawler) await crawler.close();
     }
-  } else if (plan.testCases.length > 0 && plan.testCases[0].steps.length > 0) {
-    // No URL but test cases have steps — replay from app.url
-    const appUrl = config.appUrl;
-    if (appUrl) {
-      console.log(`[GeneratorAgent] No URL provided — replaying test case steps from app.url: ${appUrl}`);
-      try {
-        crawler = new PageCrawler();
-        await crawler.launch();
-
-        const steps = plan.testCases[0].steps.map((s) => ({
-          action: s.action,
-          testData: s.testData,
-          expected: s.expected,
-        }));
-
-        const replaySnapshots = await crawler.replaySteps(steps, appUrl);
-        replaySnapshots.forEach((snap, i) => {
-          const pageName = _pageNameFromUrl(snap.url);
-          crawledSnapshots.set(pageName, snap);
-          console.log(`[GeneratorAgent] → Replay snapshot ${i + 1}: ${snap.elements.length} elements on ${pageName} (${snap.url})`);
-        });
-      } finally {
-        if (crawler) await crawler.close();
+  } else if (plan.url && plan.url.startsWith('http')) {
+    // No --url flag but plan has a URL — try loginAndNavigate
+    console.log(`[GeneratorAgent] No --url flag but plan has URL. Attempting login + navigate to: ${plan.url}`);
+    try {
+      crawler = new PageCrawler();
+      await crawler.launch();
+      const targetSnapshot = await crawler.loginAndNavigate(plan.url);
+      if (!targetSnapshot.url.includes('login')) {
+        crawledSnapshots.set(plan.page, targetSnapshot);
+        console.log(`[GeneratorAgent] ✅ Reached ${plan.page} page: ${targetSnapshot.elements.length} elements captured`);
+      } else {
+        console.warn(`[GeneratorAgent] ⚠️  Login failed — using registry only`);
       }
-    } else {
-      console.log('[GeneratorAgent] No URLs and no app.url — using registry + convention-based elements');
+    } finally {
+      if (crawler) await crawler.close();
     }
   } else {
-    console.log('[GeneratorAgent] No URLs provided — using registry + convention-based elements');
+    console.log('[GeneratorAgent] No URLs provided — using registry elements only');
   }
 
   // ── Step 4: Build element map (per page) ───────────────────────────────────

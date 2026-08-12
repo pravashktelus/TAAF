@@ -245,11 +245,48 @@ async function run(): Promise<void> {
           continue;
         }
 
-        // Use the plan's page name as primary (feature file references it)
-        // Only fall back to URL-derived name if crawling multiple URLs
         const pageName = urlsToCrawl.length === 1 ? plan.page : _pageNameFromUrl(url);
         crawledSnapshots.set(pageName, snapshot);
         console.log(`[GeneratorAgent] → ${snapshot.elements.length} elements found on ${pageName}`);
+      }
+
+      // ── Auto-crawl related pages from navigation links ──────────────────
+      if (crawledSnapshots.size > 0) {
+        const mainSnapshot = [...crawledSnapshots.values()][0];
+        const navLinks = mainSnapshot.navigationLinks || [];
+        const neededPages = new Set<string>();
+
+        plan.testCases.forEach((tc) => {
+          tc.steps.forEach((s) => {
+            const a = s.action.toLowerCase();
+            if (a.includes('login') || a.includes('signup')) neededPages.add('login');
+            if (a.includes('product') && (a.includes('detail') || a.includes('view'))) neededPages.add('product_details');
+            if (a.includes('cart')) neededPages.add('view_cart');
+          });
+        });
+
+        if (neededPages.size > 0 && navLinks.length > 0) {
+          const baseUrl = new URL(urlsToCrawl[0]).origin;
+          for (const needed of neededPages) {
+            const link = navLinks.find((l) => l.href.toLowerCase().includes(needed.replace('_', '')));
+            if (link && link.href) {
+              const fullUrl = link.href.startsWith('http') ? link.href : `${baseUrl}${link.href}`;
+              console.log(`[GeneratorAgent] Auto-crawling related page: ${fullUrl}`);
+              try {
+                const relatedSnapshot = await crawler!.crawl(fullUrl);
+                // Merge new elements into main snapshot
+                relatedSnapshot.elements.forEach((el) => {
+                  if (!mainSnapshot.elements.some((e) => e.locator === el.locator)) {
+                    mainSnapshot.elements.push(el);
+                  }
+                });
+                console.log(`[GeneratorAgent] → +${relatedSnapshot.elements.length} elements from ${needed} page`);
+              } catch (err) {
+                console.warn(`[GeneratorAgent] Could not crawl ${fullUrl}: ${err}`);
+              }
+            }
+          }
+        }
       }
     } finally {
       if (crawler) await crawler.close();

@@ -512,39 +512,47 @@ Convert ALL ${plan.testCases.length} test cases above into a single .feature fil
    * e.g. "Click on 'My Orders' navigation link" → "orders"
    */
   private static _extractNavTarget(action: string): string {
-    const quoted = action.match(/['"""']([^'"""']+)['"""']/);
+    const quoted = action.match(/[""\u201c\u201d]([^""\u201c\u201d]+)[""\u201c\u201d]/) || action.match(/[''\u2018\u2019]([^''\u2018\u2019]+)[''\u2018\u2019]/);
     if (quoted) {
-      // Strip common prefixes: "My Orders" → "Orders", "The Dashboard" → "Dashboard"
-      return quoted[1].replace(/\b(my|the|a|an)\b/gi, '').replace(/\s+/g, '').toLowerCase();
+      // Strip special chars and common prefixes: "Signup / Login" → "signuplogin"
+      return quoted[1].replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
     }
-    // Remove common verbs
-    const cleaned = action.replace(/\b(click|on|the|my|a|an|navigation|link|nav|menu|item)\b/gi, '').trim();
+    const cleaned = action.replace(/\b(click|on|the|my|a|an|i|navigation|link|nav|menu|item|in)\b/gi, '').trim();
     const words = cleaned.split(/\s+/).filter((w) => w.length > 2);
     return words.join('').toLowerCase();
   }
 
   /**
    * Extracts the click target from action text.
-   * e.g. "Click 'View Details' on an order card" → "viewdetails"
+   * e.g. "I click 'View Product' on the first product card" → "ViewProduct"
    */
   private static _extractClickTarget(action: string): string {
-    const quoted = action.match(/['"""']([^'"""']+)['"""']/);
-    if (quoted) return quoted[1].replace(/\s+/g, '');
-    const cleaned = action.replace(/\b(click|on|the|a|an|button|link|icon)\b/gi, '').trim();
+    const quoted = action.match(/[""\u201c\u201d]([^""\u201c\u201d]+)[""\u201c\u201d]/) || action.match(/[''\u2018\u2019]([^''\u2018\u2019]+)[''\u2018\u2019]/);
+    if (quoted) return quoted[1].replace(/[^a-zA-Z0-9]/g, '');
+    const cleaned = action.replace(/\b(click|on|the|a|an|i|button|link|icon|first|second)\b/gi, '').trim();
     const words = cleaned.split(/\s+/).filter((w) => w.length > 2);
     return words.slice(0, 3).join('');
   }
 
   /**
    * Extracts field target from enter/type actions.
-   * e.g. "Enter email into search box" → "search"
+   * e.g. "I enter 'adminid@gmail.com' in the email field" → "email"
+   * NOTE: Quoted value is DATA, not the field name.
    */
   private static _extractFieldTarget(action: string): string {
-    const intoMatch = action.match(/into\s+(?:the\s+)?['"""']?([^'"""']+?)['"""']?\s*(?:field|box|input)?$/i);
-    if (intoMatch) return intoMatch[1].replace(/\s+/g, '');
-    const cleaned = action.replace(/\b(enter|type|fill|into|the|field|form|input|box)\b/gi, '').trim();
-    const words = cleaned.split(/\s+/).filter((w) => w.length > 2);
-    return words.slice(-2).join('');
+    // Look for "in/into the X field/box" pattern
+    const fieldMatch = action.match(/(?:in|into)\s+(?:the\s+)?(\w+)\s*(?:field|box|form|input|area)/i);
+    if (fieldMatch) return fieldMatch[1].toLowerCase();
+
+    // Strip quoted values (those are DATA) and extract remaining field name
+    const withoutQuoted = action.replace(/"[^"]*"/g, '').replace(/\u201c[^\u201d]*\u201d/g, '');
+    const inMatch = withoutQuoted.match(/(?:in|into)\s+(?:the\s+)?(\w+)/i);
+    if (inMatch && inMatch[1].length > 2) return inMatch[1].toLowerCase();
+
+    // Fallback: strip verbs, take the last meaningful word
+    const cleaned = withoutQuoted.replace(/\b(enter|type|fill|i|my|the|a|an|and|into|in|on|clear)\b/gi, '').trim();
+    const words = cleaned.split(/[\s,]+/).filter((w) => w.length > 2 && !w.match(/[@.]/));
+    return words.slice(-1).join('').toLowerCase() || 'field';
   }
 
   /**
@@ -564,16 +572,15 @@ Convert ALL ${plan.testCases.length} test cases above into a single .feature fil
    */
   private static _extractSimpleValue(step: { action: string; testData: string }): string {
     if (step.testData) {
-      // If it starts with $$ or ## or {, it's a framework variable
       if (step.testData.startsWith('$$') || step.testData.startsWith('##') || step.testData.startsWith('{')) {
-        // Check if it's a JSON-like object — extract first simple value
         const simpleVal = step.testData.match(/['"]([^'"{}]+)['"]/);
         if (simpleVal) return simpleVal[1];
         return step.testData;
       }
       return step.testData;
     }
-    const quoted = step.action.match(/['"""']([^'"""']+)['"""']/);
+    // Extract quoted value from action (standard + curly quotes)
+    const quoted = step.action.match(/"([^"]+)"/) || step.action.match(/\u201c([^\u201d]+)\u201d/) || step.action.match(/'([^']+)'/);
     if (quoted) return quoted[1];
     return '##Value';
   }

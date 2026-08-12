@@ -256,6 +256,20 @@ async function run(): Promise<void> {
         const navLinks = mainSnapshot.navigationLinks || [];
         const neededPages = new Set<string>();
 
+        // Parse navigation flow from plan (e.g. "Home → Login → Products → View Product → Cart")
+        const navFlow = (plan as any).navigationFlow || '';
+        if (navFlow) {
+          const flowSteps = navFlow.split(/\s*[→>]\s*/).map((s: string) => s.trim().toLowerCase());
+          flowSteps.forEach((step: string) => {
+            if (step.includes('login') || step.includes('signup')) neededPages.add('login');
+            if (step.includes('product') && (step.includes('detail') || step.includes('view'))) neededPages.add('product_details');
+            if (step.includes('cart')) neededPages.add('view_cart');
+            if (step.includes('contact')) neededPages.add('contact_us');
+          });
+          console.log(`[GeneratorAgent] Navigation flow: "${navFlow}" → pages to crawl: ${[...neededPages].join(', ') || 'none additional'}`);
+        }
+
+        // Also check test case actions for pages not covered by nav flow
         plan.testCases.forEach((tc) => {
           tc.steps.forEach((s) => {
             const a = s.action.toLowerCase();

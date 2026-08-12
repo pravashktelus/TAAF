@@ -234,9 +234,16 @@ async function run(): Promise<void> {
         // ── STORY MODE with explicit ACs: Use them directly (no AI hallucination) ──
         console.log(`[PlannerAgent] Found ${parsedACs.length} acceptance criteria — using directly (no AI modification)`);
 
+        // Extract Application URL and Navigation Flow from story
+        const storyUrl = _extractStoryField(storyInput.mainContent, 'Application URL') || pageSnapshot?.url || '';
+        const navFlow = _extractStoryField(storyInput.mainContent, 'Navigation Flow') || '';
+        if (storyUrl) console.log(`[PlannerAgent] Application URL from story: ${storyUrl}`);
+        if (navFlow) console.log(`[PlannerAgent] Navigation Flow: ${navFlow}`);
+
         const directOutput = JSON.stringify({
           page,
-          url: pageSnapshot?.url || '',
+          url: storyUrl,
+          navigationFlow: navFlow,
           mode: 'story',
           aiGenerated: false,
           elements: pageSnapshot?.elements || [],
@@ -247,7 +254,7 @@ async function run(): Promise<void> {
               ac.title.toLowerCase().match(/negative|invalid|incorrect|without|unauthorized|empty/)
                 ? 'negative' : 'happy_path'
             ),
-            navigation: '',
+            navigation: navFlow,
             steps: ac.steps.map((step, si) => ({
               stepNo: si + 1,
               action: step.action,
@@ -306,6 +313,29 @@ async function run(): Promise<void> {
     // Always close browser
     if (crawler) await crawler.close();
   }
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+/**
+ * Extracts a named field value from story content.
+ * e.g. "Application URL" → "https://automationexercise.com"
+ * e.g. "Navigation Flow" → "Home → Login → Products → Cart"
+ */
+function _extractStoryField(content: string, fieldName: string): string {
+  // Match patterns like "## Application URL\nhttps://..." or "Application URL: https://..."
+  const patterns = [
+    new RegExp(`(?:^|\\n)#+\\s*${fieldName}\\s*\\n+([^\\n#]+)`, 'im'),
+    new RegExp(`${fieldName}\\s*[:\\-]\\s*(.+)`, 'im'),
+  ];
+
+  for (const pattern of patterns) {
+    const match = content.match(pattern);
+    if (match && match[1].trim()) {
+      return match[1].trim();
+    }
+  }
+  return '';
 }
 
 // ─── Entry Point ──────────────────────────────────────────────────────────────

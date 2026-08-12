@@ -299,13 +299,14 @@ async function run(): Promise<void> {
         }
       });
     });
-    console.log(`[GeneratorAgent] Element map built: ${elementRefs.size} total refs`);
-
-  } else {
-    // No URL: inject from registry using page name matching
-    _injectFromRegistry(plan, registry, elementRefs);
-    console.log(`[GeneratorAgent] Registry injection: ${elementRefs.size} element refs injected`);
+    console.log(`[GeneratorAgent] Element map from crawl: ${elementRefs.size} refs`);
   }
+
+  // ALWAYS inject from registry — complements crawled elements with existing refs
+  // This ensures the deterministic step mapper can find Login, Nav, Dashboard elements
+  _injectFromRegistry(plan, registry, elementRefs);
+  console.log(`[GeneratorAgent] Element map total (crawl + registry): ${elementRefs.size} refs`);
+
 
   // ── Step 5: Write properties files ────────────────────────────────────────
   const propertiesWriter = new PropertiesWriter();
@@ -326,25 +327,42 @@ async function run(): Promise<void> {
     }
   }
 
-  // ── Step 6: Generate feature file via AI ───────────────────────────────────
-  console.log(`\n[GeneratorAgent] Generating feature file via ${config.aiEnabled ? config.aiProvider : 'fallback'}...`);
+  // ── Step 6: Generate feature file (deterministic + AI refinement) ────────────
+  console.log(`\n[GeneratorAgent] Generating feature file...`);
 
   // Enrich AI with existing framework patterns — makes output match your app's style
   const frameworkContext = ContextEnricher.getFullContext(plan.page);
   console.log(`[GeneratorAgent] Framework context: ${frameworkContext ? 'loaded' : 'none available'}`);
 
-  const prompt = GeneratePrompts.buildPrompt(plan, elementRefs, frameworkContext);
-  const fallback = GeneratePrompts.buildFallback(plan, elementRefs);
+  // PRIMARY: Use deterministic step mapper (uses only real element refs from registry)
+  const deterministicFeature = GeneratePrompts.buildFallback(plan, elementRefs);
 
-  const featureContent = await LLMClient.askWithSystem(
-    GeneratePrompts.SYSTEM_PROMPT,
-    prompt,
-    fallback
-  );
+  // AI REFINEMENT: Only use AI if enabled AND deterministic output has too many unresolved comments
+  let featureContent = deterministicFeature;
+  const unresolvedComments = (deterministicFeature.match(/# ACTION:/g) || []).length;
+  const totalSteps = plan.testCases.reduce((sum, tc) => sum + tc.steps.length, 0);
 
-  const isAIGenerated = featureContent !== fallback && featureContent.length > 0;
-  console.log(`[GeneratorAgent] Feature file: ${isAIGenerated ? 'AI-generated' : 'fallback template'}`);
-
+  if (config.aiEnabled && unresolvedComments > totalSteps * 0.5) {
+    // More than 50% of steps couldn't be mapped — ask AI for help
+    console.log(`[GeneratorAgent] ${unresolvedComments}/${totalSteps} steps unmapped — requesting AI refinement...`);
+    const prompt = GeneratePrompts.buildPrompt(plan, elementRefs, frameworkContext);
+    const aiFeature = await LLMClient.askWithSystem(
+      GeneratePrompts.SYSTEM_PROMPT,
+      prompt,
+      deterministicFeature // fallback to deterministic if AI fails
+    );
+    // Only use AI output if it doesn't invent too many new elements
+    const aiUnresolved = _detectUnresolvedElements(aiFeature, plan.page, registry, '');
+    const detUnresolved = _detectUnresolvedElements(deterministicFeature, plan.page, registry, '');
+    if (aiUnresolved.length <= detUnresolved.length) {
+      featureContent = aiFeature;
+      console.log(`[GeneratorAgent] AI refinement accepted (${aiUnresolved.length} unresolved vs ${detUnresolved.length} in deterministic)`);
+    } else {
+      console.log(`[GeneratorAgent] AI refinement rejected — invented ${aiUnresolved.length} new elements (deterministic has ${detUnresolved.length}). Using deterministic output.`);
+    }
+  } else {
+    console.log(`[GeneratorAgent] Deterministic generation: ${totalSteps - unresolvedComments}/${totalSteps} steps mapped successfully`);
+  }
   // ── Step 7: Detect unresolved element refs in feature (warn, don't write TODOs) ─
   const unresolvedElements = _detectUnresolvedElements(featureContent, plan.page, registry, plan.url || '');
   if (unresolvedElements.length > 0) {
@@ -433,17 +451,18 @@ function _injectFromRegistry(
 
   // 1. Direct page name match
   const directElements = registry.getPageElements(plan.page);
-  directElements.forEach((el) => elementRefs.set(el.elementKey, el.ref));
+  directElements.forEach((el) => elementRefs.set(el.ref, el.ref));
 
   // 2. Fuzzy match — "Support" matches "CustomerSupport" and vice versa
-  // IMPORTANT: use full "CustomerSupport.BtnSignIn" as key so AI knows exact page name to use
   allPageNames.forEach((pageName) => {
     if (pageName.toLowerCase() === planPageLower) return;
     const regPageLower = pageName.toLowerCase();
     if (regPageLower.includes(planPageLower) || planPageLower.includes(regPageLower)) {
       const els = registry.getPageElements(pageName);
-      els.forEach((el) => elementRefs.set(`${pageName}.${el.elementKey}`, el.ref));
-      console.log(`[GeneratorAgent] Fuzzy match: ${pageName} → ${els.length} elements injected as ${pageName}.*`);
+      els.forEach((el) => {
+        if (!elementRefs.has(el.ref)) elementRefs.set(el.ref, el.ref);
+      });
+      console.log(`[GeneratorAgent] Fuzzy match: ${pageName} → ${els.length} elements injected`);
     }
   });
 
@@ -453,14 +472,29 @@ function _injectFromRegistry(
     .join(' ')
     .toLowerCase();
 
+  // Always include TeleConnect (login page) — almost every flow starts with login
+  if (!navigationText.includes('teleconnect')) {
+    const loginKeywords = ['login', 'sign in', 'sign-in', 'credentials', 'email', 'password'];
+    const hasLoginSteps = loginKeywords.some((kw) => navigationText.includes(kw));
+    if (hasLoginSteps) {
+      const teleConnectEls = registry.getPageElements('TeleConnect');
+      teleConnectEls.forEach((el) => {
+        if (!elementRefs.has(el.ref)) elementRefs.set(el.ref, el.ref);
+      });
+      if (teleConnectEls.length > 0) {
+        console.log(`[GeneratorAgent] Login detected: TeleConnect → ${teleConnectEls.length} elements injected`);
+      }
+    }
+  }
+
   allPageNames.forEach((pageName) => {
     const regPageLower = pageName.toLowerCase();
     if (regPageLower === planPageLower) return;
     if (navigationText.includes(regPageLower)) {
       const els = registry.getPageElements(pageName);
       els.forEach((el) => {
-        if (!elementRefs.has(el.elementKey)) {
-          elementRefs.set(`${pageName}.${el.elementKey}`, el.ref);
+        if (!elementRefs.has(el.ref)) {
+          elementRefs.set(el.ref, el.ref);
         }
       });
       console.log(`[GeneratorAgent] Navigation match: ${pageName} → ${els.length} elements injected`);

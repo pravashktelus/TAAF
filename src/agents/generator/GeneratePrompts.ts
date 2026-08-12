@@ -450,9 +450,12 @@ Convert ALL ${plan.testCases.length} test cases above into a single .feature fil
    */
   private static _extractNavTarget(action: string): string {
     const quoted = action.match(/['"""']([^'"""']+)['"""']/);
-    if (quoted) return quoted[1].replace(/\s+/g, '').toLowerCase();
+    if (quoted) {
+      // Strip common prefixes: "My Orders" → "Orders", "The Dashboard" → "Dashboard"
+      return quoted[1].replace(/\b(my|the|a|an)\b/gi, '').replace(/\s+/g, '').toLowerCase();
+    }
     // Remove common verbs
-    const cleaned = action.replace(/\b(click|on|the|navigation|link|nav|menu|item)\b/gi, '').trim();
+    const cleaned = action.replace(/\b(click|on|the|my|a|an|navigation|link|nav|menu|item)\b/gi, '').trim();
     const words = cleaned.split(/\s+/).filter((w) => w.length > 2);
     return words.join('').toLowerCase();
   }

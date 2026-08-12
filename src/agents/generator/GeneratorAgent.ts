@@ -245,7 +245,9 @@ async function run(): Promise<void> {
           continue;
         }
 
-        const pageName = _pageNameFromUrl(url);
+        // Use the plan's page name as primary (feature file references it)
+        // Only fall back to URL-derived name if crawling multiple URLs
+        const pageName = urlsToCrawl.length === 1 ? plan.page : _pageNameFromUrl(url);
         crawledSnapshots.set(pageName, snapshot);
         console.log(`[GeneratorAgent] → ${snapshot.elements.length} elements found on ${pageName}`);
       }
@@ -364,7 +366,10 @@ async function run(): Promise<void> {
   }
 
   // ── Step 7b: Validate output (P6 — gate before --apply) ───────────────────
-  const validator = new OutputValidator(registry);
+  // Reload registry to pick up newly-written .properties files from Step 5
+  const freshRegistry = new PropertiesRegistry();
+  freshRegistry.load();
+  const validator = new OutputValidator(freshRegistry);
   const validation = validator.validate(featureContent, plan, args.apply);
   validator.printResults(validation);
 

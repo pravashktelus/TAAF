@@ -114,7 +114,7 @@ export class PageCrawler {
       return;
     }
 
-    console.log(`[PageCrawler] Logging in at: ${loginUrl}`);
+    console.log(`[PageCrawler] Logging in at: ${loginUrl} with: ${username}`);
     await this.page.goto(loginUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
     await this.page.waitForTimeout(1000);
 
@@ -170,8 +170,15 @@ export class PageCrawler {
       } catch { continue; }
     }
 
-    await this.page.waitForTimeout(2000);
-    console.log(`[PageCrawler] Login complete. Current URL: ${this.page.url()}`);
+    // Wait for navigation after login (URL should change from /login)
+    try {
+      await this.page.waitForURL((url) => !url.toString().includes('/login'), { timeout: 10000 });
+      console.log(`[PageCrawler] Login successful. Current URL: ${this.page.url()}`);
+    } catch {
+      // Timeout — still on login page, credentials may be invalid
+      await this.page.waitForTimeout(2000);
+      console.warn(`[PageCrawler] Login may have failed. Current URL: ${this.page.url()}`);
+    }
   }
 
   /**

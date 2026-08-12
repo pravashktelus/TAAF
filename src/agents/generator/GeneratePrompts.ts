@@ -238,8 +238,7 @@ Convert ALL ${plan.testCases.length} test cases above into a single .feature fil
    * Maps a single plan step (action + testData + expected) into one or more
    * Gherkin steps using rule-based pattern matching.
    *
-   * This is the core P3 fix: instead of asking AI to generate the whole feature,
-   * we map each step deterministically and only flag truly ambiguous ones.
+   * This is the core P3 fix: deterministic, uses real element refs from registry.
    */
   private static _mapStepToGherkin(
     step: { stepNo: number; action: string; navigation: string; testData: string; expected: string },
@@ -248,305 +247,274 @@ Convert ALL ${plan.testCases.length} test cases above into a single .feature fil
   ): string[] {
     const results: string[] = [];
     const action = step.action.toLowerCase();
-    const expected = step.expected.toLowerCase();
 
-    // Add section comment for readability
+    // Add section comment
     results.push(`# ═══ Step ${step.stepNo}: ${step.action.substring(0, 60)} ═══`);
 
-    // ─── Pattern: Navigate / Open ───────────────────────────────────────
-    if (action.includes('navigate') || action.includes('open') || action.includes('go to')) {
-      // If step mentions a specific URL
+    // ─── Pattern: Login/Credentials (compound — split into email + password + submit) ─
+    if ((action.includes('credential') || (action.includes('enter') && action.includes('login'))) && !action.includes('navigate')) {
+      const emailRef = this._findByRole(elementRefs, 'login', 'email') || this._findByRole(elementRefs, 'signin', 'email');
+      const passRef = this._findByRole(elementRefs, 'login', 'password') || this._findByRole(elementRefs, 'signin', 'password');
+
+      // Parse testData for email/password values
+      const { email, password } = this._parseCredentials(step.testData);
+
+      if (emailRef) results.push(`When I enter '${email}' into '${emailRef}'`);
+      if (passRef) results.push(`When I enter '${password}' into '${passRef}'`);
+      return results;
+    }
+
+    // ─── Pattern: Click Sign In / Submit / Login button ─────────────────
+    if (action.includes('sign in') || action.includes('signin') || (action.includes('click') && action.includes('login'))) {
+      const ref = this._findByRole(elementRefs, 'login', 'submit') || this._findByRole(elementRefs, 'signin', 'submit');
+      if (ref) {
+        results.push(`When I click '${ref}'`);
+      } else {
+        results.push(`When I click '${pageName}.BtnSignIn'`);
+      }
+      return results;
+    }
+
+    // ─── Pattern: Navigate / Click navigation link ──────────────────────
+    if (action.includes('navigation link') || action.includes('nav link') || action.includes('menu')) {
+      const navTarget = this._extractNavTarget(step.action);
+      const ref = this._findByRole(elementRefs, 'nav', navTarget);
+      if (ref) {
+        results.push(`When I click '${ref}'`);
+      } else {
+        results.push(`When I click '${pageName}.Nav${this._capitalize(navTarget)}'`);
+      }
+      return results;
+    }
+
+    // ─── Pattern: Click with specific target ────────────────────────────
+    if (action.includes('click')) {
+      const target = this._extractClickTarget(step.action);
+      const ref = this._findByRole(elementRefs, 'btn', target)
+        || this._findByRole(elementRefs, 'nav', target)
+        || this._findByKeyword(elementRefs, target);
+      if (ref) {
+        results.push(`When I click '${ref}'`);
+      } else {
+        results.push(`When I click '${pageName}.Btn${this._capitalize(target)}'`);
+      }
+      return results;
+    }
+
+    // ─── Pattern: Navigate to application ───────────────────────────────
+    if (action.includes('navigate') && (action.includes('application') || action.includes('login page'))) {
+      // Already handled by the "Given I navigate to the application" at scenario start
+      return results;
+    }
+
+    // ─── Pattern: Navigate to URL ───────────────────────────────────────
+    if (action.includes('navigate') || action.includes('go to') || action.includes('open')) {
       const urlMatch = step.action.match(/https?:\/\/[^\s'"]+/) || step.testData.match(/https?:\/\/[^\s'"]+/);
       if (urlMatch) {
         results.push(`Given I navigate to '${urlMatch[0]}'`);
       }
-      // If navigating via a nav link element
-      const navRef = this._findElementRef(step.action, pageName, elementRefs, 'nav');
-      if (navRef && !urlMatch) {
-        results.push(`When I click '${navRef}'`);
-      }
-    }
-
-    // ─── Pattern: Click ─────────────────────────────────────────────────
-    else if (action.includes('click')) {
-      const ref = this._findElementRef(step.action, pageName, elementRefs, 'btn');
-      if (ref) {
-        results.push(`When I click '${ref}'`);
-      } else {
-        results.push(`# ACTION: ${step.action}`);
-        results.push(`When I click '${pageName}.${this._suggestKey(step.action, 'Btn')}'`);
-      }
-    }
-
-    // ─── Pattern: Enter / Type / Fill ───────────────────────────────────
-    else if (action.includes('enter') || action.includes('type') || action.includes('fill') || action.includes('input')) {
-      const ref = this._findElementRef(step.action, pageName, elementRefs, 'input');
-      const value = this._extractValue(step);
-      if (ref) {
-        results.push(`When I enter '${value}' into '${ref}'`);
-      } else {
-        results.push(`# ACTION: ${step.action}`);
-        results.push(`When I enter '${value}' into '${pageName}.${this._suggestKey(step.action, 'Input')}'`);
-      }
-    }
-
-    // ─── Pattern: Select / Dropdown ─────────────────────────────────────
-    else if (action.includes('select') || action.includes('dropdown') || action.includes('choose')) {
-      const ref = this._findElementRef(step.action, pageName, elementRefs, 'select');
-      const value = this._extractValue(step);
-      if (ref) {
-        results.push(`When I select '${value}' from dropdown '${ref}'`);
-      } else {
-        results.push(`# ACTION: ${step.action}`);
-        results.push(`When I select '${value}' from dropdown '${pageName}.${this._suggestKey(step.action, 'Select')}'`);
-      }
-    }
-
-    // ─── Pattern: Verify / Assert / Check ───────────────────────────────
-    else if (action.includes('verify') || action.includes('validate') || action.includes('check') || action.includes('assert') || action.includes('should')) {
-      const verifySteps = this._buildVerifySteps(step, pageName, elementRefs);
-      results.push(...verifySteps);
-    }
-
-    // ─── Pattern: Store / Capture ───────────────────────────────────────
-    else if (action.includes('capture') || action.includes('store') || action.includes('get text') || action.includes('save')) {
-      const ref = this._findElementRef(step.action, pageName, elementRefs);
-      const varName = this._extractVarName(step.action);
-      if (ref) {
-        results.push(`When I get text from '${ref}' and store as '${varName}'`);
-        results.push(`Then I attach '${varName}' to the report as '${varName}'`);
-      } else {
-        results.push(`# ACTION: ${step.action}`);
-        results.push(`When I get text from '${pageName}.${this._suggestKey(step.action, '')}' and store as '${varName}'`);
-      }
-    }
-
-    // ─── Pattern: Wait ──────────────────────────────────────────────────
-    else if (action.includes('wait')) {
-      const seconds = action.match(/(\d+)/)?.[1] || '2';
-      results.push(`When I wait ${seconds} seconds`);
-    }
-
-    // ─── Pattern: Scroll ────────────────────────────────────────────────
-    else if (action.includes('scroll')) {
-      const ref = this._findElementRef(step.action, pageName, elementRefs);
-      if (ref) {
-        results.push(`When I scroll to '${ref}'`);
-      } else {
-        results.push(`# ACTION: ${step.action} — scroll target not mapped`);
-      }
-    }
-
-    // ─── Fallback: Unrecognized action ──────────────────────────────────
-    else {
-      results.push(`# ACTION: ${step.action}`);
-      // Try to infer from expected result
-      if (step.expected) {
-        const verifySteps = this._buildVerifySteps(step, pageName, elementRefs);
-        if (verifySteps.length > 0) results.push(...verifySteps);
-      }
-    }
-
-    // ─── Add expected result assertions if not already covered ───────────
-    if (step.expected && !action.includes('verify') && !action.includes('validate') && !action.includes('check')) {
-      const expectedSteps = this._buildExpectedAssertions(step.expected, pageName, elementRefs);
-      results.push(...expectedSteps);
-    }
-
-    return results;
-  }
-
-  // ─── Step Mapping Helpers ─────────────────────────────────────────────────
-
-  /**
-   * Finds the best matching element ref from available refs for a given action text.
-   */
-  private static _findElementRef(
-    actionText: string,
-    pageName: string,
-    elementRefs: Map<string, string>,
-    preferType?: string
-  ): string | null {
-    const actionLower = actionText.toLowerCase();
-
-    // Extract keywords from action (strip common verbs)
-    const keywords = actionLower
-      .replace(/\b(click|enter|type|fill|select|verify|navigate|check|on|the|a|an|in|to|from|into|should|be|is|are|i|and|then|when|given)\b/g, '')
-      .split(/[\s'"""''.,;:]+/)
-      .filter((w) => w.length > 2);
-
-    let bestMatch: string | null = null;
-    let bestScore = 0;
-
-    elementRefs.forEach((ref) => {
-      const refLower = ref.toLowerCase();
-      let score = 0;
-
-      keywords.forEach((kw) => {
-        if (refLower.includes(kw)) score += 2;
-      });
-
-      // Bonus for matching type prefix
-      if (preferType) {
-        if (preferType === 'btn' && refLower.includes('btn')) score += 1;
-        if (preferType === 'input' && (refLower.includes('input') || refLower.includes('email') || refLower.includes('password') || refLower.includes('name'))) score += 1;
-        if (preferType === 'nav' && refLower.includes('nav')) score += 1;
-        if (preferType === 'select' && refLower.includes('select')) score += 1;
-      }
-
-      if (score > bestScore) {
-        bestScore = score;
-        bestMatch = ref;
-      }
-    });
-
-    return bestScore >= 2 ? bestMatch : null;
-  }
-
-  /**
-   * Extracts the data value to use in a step from testData or action text.
-   */
-  private static _extractValue(step: { action: string; testData: string }): string {
-    // Check testData first
-    if (step.testData) {
-      // If it's a JSON-like object, try to extract the first value
-      const kvMatch = step.testData.match(/['"]([^'"]+)['"]\s*[:,]\s*['"]([^'"]+)['"]/);
-      if (kvMatch) return kvMatch[2];
-
-      // If it's a simple variable reference
-      if (step.testData.startsWith('$$') || step.testData.startsWith('{') || step.testData.startsWith('##')) {
-        return step.testData;
-      }
-
-      return step.testData;
-    }
-
-    // Try to extract quoted value from action
-    const quoted = step.action.match(/['"""''']([^'"""''']+)['"""''']/);
-    if (quoted) return quoted[1];
-
-    // Use random data placeholder
-    return '##Value';
-  }
-
-  /**
-   * Extracts a variable name from action text for store operations.
-   */
-  private static _extractVarName(action: string): string {
-    // Look for known patterns: "store as X", "capture X"
-    const storeMatch = action.match(/(?:store|save|capture)\s+(?:as\s+)?['"]?(\w+)['"]?/i);
-    if (storeMatch) return storeMatch[1];
-
-    // Extract the noun from the action
-    const words = action.replace(/\b(capture|store|get|text|from|and|show|in|the|report)\b/gi, '')
-      .trim().split(/\s+/).filter((w) => w.length > 2);
-    return words.length > 0 ? words.join('') : 'CapturedValue';
-  }
-
-  /**
-   * Suggests a PascalCase element key from action text.
-   */
-  private static _suggestKey(action: string, prefix: string): string {
-    const words = action
-      .replace(/\b(click|enter|type|fill|select|verify|navigate|on|the|a|an|in|to|from|into|should|be|button|link|field|input)\b/gi, '')
-      .trim()
-      .split(/[\s'"""''.,;:]+/)
-      .filter((w) => w.length > 2)
-      .slice(0, 3)
-      .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase());
-
-    return prefix + words.join('');
-  }
-
-  /**
-   * Builds verify/assertion steps from a step's expected result.
-   */
-  private static _buildVerifySteps(
-    step: { action: string; expected: string },
-    pageName: string,
-    elementRefs: Map<string, string>
-  ): string[] {
-    const results: string[] = [];
-    const expected = step.expected;
-    const expectedLower = expected.toLowerCase();
-
-    // Pattern: "should be visible" or "should be displayed"
-    if (expectedLower.includes('visible') || expectedLower.includes('displayed') || expectedLower.includes('shown')) {
-      const ref = this._findElementRef(step.action + ' ' + step.expected, pageName, elementRefs);
-      if (ref) {
-        results.push(`Then '${ref}' should be visible`);
-      }
-    }
-
-    // Pattern: "should have text X" or "should show X"
-    const textMatch = expected.match(/(?:should\s+(?:have|show|display)\s+(?:text\s+)?|heading\s+)['"""''']([^'"""''']+)['"""''']/i)
-      || expected.match(/(?:shows?|displays?|contains?)\s+['"""''']([^'"""''']+)['"""''']/i);
-    if (textMatch) {
-      const ref = this._findElementRef(step.action + ' ' + step.expected, pageName, elementRefs);
-      if (ref) {
-        results.push(`Then '${ref}' should have text '${textMatch[1]}'`);
-      }
-    }
-
-    // Pattern: URL should contain
-    const urlMatch = expected.match(/url\s+(?:should\s+)?contain[s]?\s+['"""''']([^'"""''']+)['"""''']/i)
-      || expected.match(/redirect.*?to\s+.*?\/([^\s'"]+)/i)
-      || expected.match(/navigate.*?(?:to\s+)?\/([^\s'"]+)/i);
-    if (urlMatch) {
-      results.push(`Then the url should contain '${urlMatch[1]}'`);
-    }
-
-    // Pattern: color assertions
-    const colorMatch = expected.match(/(red|green|blue|orange)\s+(?:color|text)/i)
-      || expected.match(/color\s+(?:should\s+be\s+)?(red|green|blue|orange)/i);
-    if (colorMatch) {
-      const ref = this._findElementRef(step.action + ' ' + step.expected, pageName, elementRefs);
-      if (ref) {
-        results.push(`Then '${ref}' should have color '${colorMatch[1].toLowerCase()}'`);
-      }
-    }
-
-    // If no specific assertion matched, add a generic visible check
-    if (results.length === 0 && step.expected) {
-      results.push(`# EXPECTED: ${step.expected}`);
-    }
-
-    return results;
-  }
-
-  /**
-   * Builds assertions from the expected result text when the primary action was NOT a verify.
-   */
-  private static _buildExpectedAssertions(
-    expected: string,
-    pageName: string,
-    elementRefs: Map<string, string>
-  ): string[] {
-    const results: string[] = [];
-    const expectedLower = expected.toLowerCase();
-
-    // Skip if expected is just confirmation of a click/enter action
-    if (expectedLower.includes('button') && expectedLower.includes('enabled')) return results;
-    if (expectedLower.includes('form') && (expectedLower.includes('visible') || expectedLower.includes('shown'))) return results;
-
-    // URL assertions
-    const urlMatch = expected.match(/(?:url|page|redirect).*?(?:contain|show|display).*?['"""''']([^'"""''']+)['"""''']/i)
-      || expected.match(/\/([a-z][\w-/]*)/i);
-    if (urlMatch && (expectedLower.includes('url') || expectedLower.includes('redirect') || expectedLower.includes('navigate'))) {
-      results.push(`Then the url should contain '${urlMatch[1]}'`);
       return results;
     }
 
-    // Element visibility with text
-    const textInExpected = expected.match(/['"""''']([^'"""''']+)['"""''']/);
-    if (textInExpected && (expectedLower.includes('display') || expectedLower.includes('show') || expectedLower.includes('visible') || expectedLower.includes('heading'))) {
-      const ref = this._findElementRef(expected, pageName, elementRefs);
+    // ─── Pattern: Enter / Type into specific field ──────────────────────
+    if (action.includes('enter') || action.includes('type') || action.includes('fill')) {
+      const fieldHint = this._extractFieldTarget(step.action);
+      const ref = this._findByRole(elementRefs, 'input', fieldHint)
+        || this._findByKeyword(elementRefs, fieldHint);
+      const value = this._extractSimpleValue(step);
       if (ref) {
-        results.push(`Then '${ref}' should be visible`);
+        results.push(`When I enter '${value}' into '${ref}'`);
+      } else {
+        results.push(`When I enter '${value}' into '${pageName}.Input${this._capitalize(fieldHint)}'`);
+      }
+      return results;
+    }
+
+    // ─── Pattern: Select / Dropdown ─────────────────────────────────────
+    if (action.includes('select') || action.includes('dropdown') || action.includes('choose')) {
+      const fieldHint = this._extractFieldTarget(step.action);
+      const ref = this._findByRole(elementRefs, 'select', fieldHint);
+      const value = this._extractSimpleValue(step);
+      if (ref) {
+        results.push(`When I select '${value}' from dropdown '${ref}'`);
+      } else {
+        results.push(`When I select '${value}' from dropdown '${pageName}.Select${this._capitalize(fieldHint)}'`);
+      }
+      return results;
+    }
+
+    // ─── Pattern: Verify / Validate ─────────────────────────────────────
+    if (action.includes('verify') || action.includes('validate') || action.includes('check') || action.includes('should')) {
+      const target = this._extractVerifyTarget(step.action, step.expected);
+      const ref = this._findByKeyword(elementRefs, target);
+      if (ref) {
+        // Determine assertion type from expected
+        const textMatch = step.expected.match(/['"""']([^'"""']+)['"""']/);
+        if (textMatch) {
+          results.push(`Then '${ref}' should have text '${textMatch[1]}'`);
+        } else {
+          results.push(`Then '${ref}' should be visible`);
+        }
+      } else {
+        results.push(`Then '${pageName}.${this._capitalize(target)}' should be visible`);
+      }
+      return results;
+    }
+
+    // ─── Pattern: Wait ──────────────────────────────────────────────────
+    if (action.includes('wait')) {
+      const seconds = action.match(/(\d+)/)?.[1] || '2';
+      results.push(`When I wait ${seconds} seconds`);
+      return results;
+    }
+
+    // ─── Fallback: couldn't map ─────────────────────────────────────────
+    results.push(`# ACTION: ${step.action}`);
+    if (step.expected) results.push(`# EXPECTED: ${step.expected}`);
+    return results;
+  }
+
+  // ─── Improved Element Matching Helpers ────────────────────────────────────
+
+  /**
+   * Finds an element ref by role prefix + keyword.
+   * e.g. findByRole(refs, 'login', 'email') → 'TeleConnect.LoginEmail'
+   * e.g. findByRole(refs, 'nav', 'orders') → 'TeleConnect.NavOrders'
+   */
+  private static _findByRole(
+    elementRefs: Map<string, string>,
+    rolePrefix: string,
+    keyword: string
+  ): string | null {
+    const roleLower = rolePrefix.toLowerCase();
+    const kwLower = keyword.toLowerCase();
+
+    for (const [, ref] of elementRefs) {
+      const refLower = ref.toLowerCase();
+      const parts = ref.split('.');
+      if (parts.length < 2) continue;
+      const elementKey = parts[1].toLowerCase();
+
+      // Exact role+keyword match: "LoginEmail", "NavOrders", "BtnSignIn"
+      if (elementKey.includes(roleLower) && elementKey.includes(kwLower)) {
+        return ref;
       }
     }
 
-    return results;
+    // Looser: just keyword in element key with right prefix pattern
+    for (const [, ref] of elementRefs) {
+      const parts = ref.split('.');
+      if (parts.length < 2) continue;
+      const elementKey = parts[1].toLowerCase();
+
+      if (roleLower === 'btn' && elementKey.startsWith('btn') && elementKey.includes(kwLower)) return ref;
+      if (roleLower === 'nav' && elementKey.startsWith('nav') && elementKey.includes(kwLower)) return ref;
+      if (roleLower === 'input' && (elementKey.startsWith('input') || elementKey.includes(kwLower)) && elementKey.includes(kwLower)) return ref;
+      if (roleLower === 'select' && elementKey.startsWith('select') && elementKey.includes(kwLower)) return ref;
+    }
+
+    return null;
+  }
+
+  /**
+   * Finds an element ref by keyword match in the element key.
+   */
+  private static _findByKeyword(elementRefs: Map<string, string>, keyword: string): string | null {
+    if (!keyword || keyword.length < 3) return null;
+    const kwLower = keyword.toLowerCase();
+
+    for (const [, ref] of elementRefs) {
+      const parts = ref.split('.');
+      if (parts.length < 2) continue;
+      const elementKey = parts[1].toLowerCase();
+      if (elementKey.includes(kwLower)) return ref;
+    }
+    return null;
+  }
+
+  /**
+   * Parses credentials from testData like "{Email: 'x', Password: 'y'}"
+   */
+  private static _parseCredentials(testData: string): { email: string; password: string } {
+    const emailMatch = testData.match(/[Ee]mail['":\s]*['"]([^'"]+)['"]/);
+    const passMatch = testData.match(/[Pp]assword['":\s]*['"]([^'"]+)['"]/);
+    return {
+      email: emailMatch ? emailMatch[1] : '$$Email',
+      password: passMatch ? passMatch[1] : '$$Password',
+    };
+  }
+
+  /**
+   * Extracts the navigation target from action text.
+   * e.g. "Click on 'My Orders' navigation link" → "orders"
+   */
+  private static _extractNavTarget(action: string): string {
+    const quoted = action.match(/['"""']([^'"""']+)['"""']/);
+    if (quoted) return quoted[1].replace(/\s+/g, '').toLowerCase();
+    // Remove common verbs
+    const cleaned = action.replace(/\b(click|on|the|navigation|link|nav|menu|item)\b/gi, '').trim();
+    const words = cleaned.split(/\s+/).filter((w) => w.length > 2);
+    return words.join('').toLowerCase();
+  }
+
+  /**
+   * Extracts the click target from action text.
+   * e.g. "Click 'View Details' on an order card" → "viewdetails"
+   */
+  private static _extractClickTarget(action: string): string {
+    const quoted = action.match(/['"""']([^'"""']+)['"""']/);
+    if (quoted) return quoted[1].replace(/\s+/g, '');
+    const cleaned = action.replace(/\b(click|on|the|a|an|button|link|icon)\b/gi, '').trim();
+    const words = cleaned.split(/\s+/).filter((w) => w.length > 2);
+    return words.slice(0, 3).join('');
+  }
+
+  /**
+   * Extracts field target from enter/type actions.
+   * e.g. "Enter email into search box" → "search"
+   */
+  private static _extractFieldTarget(action: string): string {
+    const intoMatch = action.match(/into\s+(?:the\s+)?['"""']?([^'"""']+?)['"""']?\s*(?:field|box|input)?$/i);
+    if (intoMatch) return intoMatch[1].replace(/\s+/g, '');
+    const cleaned = action.replace(/\b(enter|type|fill|into|the|field|form|input|box)\b/gi, '').trim();
+    const words = cleaned.split(/\s+/).filter((w) => w.length > 2);
+    return words.slice(-2).join('');
+  }
+
+  /**
+   * Extracts verify target from action/expected text.
+   */
+  private static _extractVerifyTarget(action: string, expected: string): string {
+    const combined = `${action} ${expected}`;
+    const quoted = combined.match(/['"""']([^'"""']+)['"""']/);
+    if (quoted) return quoted[1].replace(/\s+/g, '');
+    const cleaned = combined.replace(/\b(verify|validate|check|should|be|is|are|visible|displayed|shown|at least|one|the)\b/gi, '').trim();
+    const words = cleaned.split(/\s+/).filter((w) => w.length > 2);
+    return words.slice(0, 3).join('');
+  }
+
+  /**
+   * Extracts a simple value from testData or action text.
+   */
+  private static _extractSimpleValue(step: { action: string; testData: string }): string {
+    if (step.testData) {
+      // If it starts with $$ or ## or {, it's a framework variable
+      if (step.testData.startsWith('$$') || step.testData.startsWith('##') || step.testData.startsWith('{')) {
+        // Check if it's a JSON-like object — extract first simple value
+        const simpleVal = step.testData.match(/['"]([^'"{}]+)['"]/);
+        if (simpleVal) return simpleVal[1];
+        return step.testData;
+      }
+      return step.testData;
+    }
+    const quoted = step.action.match(/['"""']([^'"""']+)['"""']/);
+    if (quoted) return quoted[1];
+    return '##Value';
+  }
+
+  private static _capitalize(str: string): string {
+    if (!str) return 'Unknown';
+    return str.charAt(0).toUpperCase() + str.slice(1);
   }
 
   // ─── Private Helpers ──────────────────────────────────────────────────────

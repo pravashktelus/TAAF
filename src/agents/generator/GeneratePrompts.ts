@@ -532,8 +532,8 @@ Convert ALL ${plan.testCases.length} test cases above into a single .feature fil
     // URL assertions
     const urlMatch = expected.match(/(?:url|page|redirect).*?(?:contain|show|display).*?['"""''']([^'"""''']+)['"""''']/i)
       || expected.match(/\/([a-z][\w-/]*)/i);
-    if (urlMatch && expectedLower.includes('url') || expectedLower.includes('redirect') || expectedLower.includes('navigate')) {
-      results.push(`Then the url should contain '${urlMatch![1]}'`);
+    if (urlMatch && (expectedLower.includes('url') || expectedLower.includes('redirect') || expectedLower.includes('navigate'))) {
+      results.push(`Then the url should contain '${urlMatch[1]}'`);
       return results;
     }
 

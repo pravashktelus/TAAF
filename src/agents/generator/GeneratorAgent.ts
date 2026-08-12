@@ -370,41 +370,72 @@ async function run(): Promise<void> {
     }
   }
 
-  // ── Step 6: Generate feature file (deterministic + AI refinement) ────────────
+  // ── Step 6: Generate feature file (per-AC AI calls or deterministic fallback) ─
   console.log(`\n[GeneratorAgent] Generating feature file...`);
 
-  // Enrich AI with existing framework patterns — makes output match your app's style
   const frameworkContext = ContextEnricher.getFullContext(plan.page);
   console.log(`[GeneratorAgent] Framework context: ${frameworkContext ? 'loaded' : 'none available'}`);
 
-  // PRIMARY: Use deterministic step mapper (uses only real element refs from registry)
-  const deterministicFeature = GeneratePrompts.buildFallback(plan, elementRefs);
+  let featureContent: string;
 
-  // AI REFINEMENT: Only use AI if enabled AND deterministic output has too many unresolved comments
-  let featureContent = deterministicFeature;
-  const unresolvedComments = (deterministicFeature.match(/# ACTION:/g) || []).length;
-  const totalSteps = plan.testCases.reduce((sum, tc) => sum + tc.steps.length, 0);
+  if (config.aiEnabled) {
+    // ── AI MODE: Generate steps per-AC with focused prompts ──────────────
+    console.log(`[GeneratorAgent] Using per-AC AI generation (${config.aiProvider})...`);
+    const moduleName = plan.page.toLowerCase();
+    const featureLines: string[] = [];
 
-  if (config.aiEnabled && unresolvedComments > totalSteps * 0.5) {
-    // More than 50% of steps couldn't be mapped — ask AI for help
-    console.log(`[GeneratorAgent] ${unresolvedComments}/${totalSteps} steps unmapped — requesting AI refinement...`);
-    const prompt = GeneratePrompts.buildPrompt(plan, elementRefs, frameworkContext);
-    const aiFeature = await LLMClient.askWithSystem(
-      GeneratePrompts.SYSTEM_PROMPT,
-      prompt,
-      deterministicFeature // fallback to deterministic if AI fails
-    );
-    // Only use AI output if it doesn't invent too many new elements
-    const aiUnresolved = _detectUnresolvedElements(aiFeature, plan.page, registry, '');
-    const detUnresolved = _detectUnresolvedElements(deterministicFeature, plan.page, registry, '');
-    if (aiUnresolved.length <= detUnresolved.length) {
-      featureContent = aiFeature;
-      console.log(`[GeneratorAgent] AI refinement accepted (${aiUnresolved.length} unresolved vs ${detUnresolved.length} in deterministic)`);
-    } else {
-      console.log(`[GeneratorAgent] AI refinement rejected — invented ${aiUnresolved.length} new elements (deterministic has ${detUnresolved.length}). Using deterministic output.`);
+    featureLines.push(`@web @${moduleName}_web`);
+    featureLines.push(`Feature: ${plan.page} - ${plan.sourceFile?.replace(/\.[^.]+$/, '') || 'Generated Feature'}`);
+    featureLines.push(`  As a user`);
+    featureLines.push(`  I want to interact with the ${plan.page} page`);
+    featureLines.push('');
+
+    // Build available elements list for AI context
+    const availableElements = [...elementRefs.values()].map((ref) => `  '${ref}'`);
+
+    for (const tc of plan.testCases) {
+      const tags = tc.type === 'negative' ? '@negative @regression' : '@smoke @e2e';
+      featureLines.push(`  ${tags}`);
+      featureLines.push(`  Scenario: ${tc.id} ${tc.title}`);
+      featureLines.push(`    Given I navigate to the application`);
+
+      // Per-AC AI call
+      const acPrompt = GeneratePrompts.buildPerACPrompt(tc, plan.page, availableElements);
+      const deterministicFallback = tc.steps.map((s) => {
+        const mapped = GeneratePrompts['_mapStepToGherkin'](s, plan.page, elementRefs);
+        return mapped.filter((l: string) => !l.startsWith('#')).map((l: string) => `    ${l}`).join('\n');
+      }).join('\n');
+
+      const aiSteps = await LLMClient.askWithSystem(
+        'You are a BDD automation expert. Output ONLY Gherkin steps — no explanation, no markdown, no headers.',
+        acPrompt,
+        deterministicFallback
+      );
+
+      // Parse AI response — each line should be a step
+      const stepLines = aiSteps
+        .split('\n')
+        .map((l) => l.trim())
+        .filter((l) => l.match(/^(When|Then|And|But|Given)\s/i))
+        .map((l) => `    ${l}`);
+
+      if (stepLines.length > 0) {
+        featureLines.push(...stepLines);
+      } else {
+        // AI returned nothing usable — use deterministic
+        featureLines.push(deterministicFallback);
+      }
+
+      featureLines.push('');
     }
+
+    featureContent = featureLines.join('\n');
+    console.log(`[GeneratorAgent] Feature file generated via per-AC AI (${plan.testCases.length} scenarios)`);
+
   } else {
-    console.log(`[GeneratorAgent] Deterministic generation: ${totalSteps - unresolvedComments}/${totalSteps} steps mapped successfully`);
+    // ── FALLBACK: deterministic step mapper ──────────────────────────────
+    featureContent = GeneratePrompts.buildFallback(plan, elementRefs);
+    console.log(`[GeneratorAgent] Feature file generated via deterministic mapper (no AI)`);
   }
   // ── Step 7: Detect unresolved element refs in feature (warn, don't write TODOs) ─
   const unresolvedElements = _detectUnresolvedElements(featureContent, plan.page, registry, plan.url || '');

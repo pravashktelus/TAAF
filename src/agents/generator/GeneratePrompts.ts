@@ -198,12 +198,11 @@ Convert ALL ${plan.testCases.length} test cases above into a single .feature fil
   // ─── Fallback Template ────────────────────────────────────────────────────
 
   /**
-   * Deterministic feature file builder — produces a complete .feature file
-   * directly from the plan JSON using rule-based step mapping.
-   * Used as fallback when AI is unavailable, AND as the primary builder (P3 fix).
+   * Builds the feature file using per-AC focused AI calls.
+   * Each AC is sent to AI individually with available elements as context.
+   * This prevents hallucination by constraining each call to a small scope.
    *
-   * The AI prompt (buildPrompt) is now used only to REFINE individual ambiguous steps,
-   * not to generate the entire feature file from scratch.
+   * Falls back to deterministic mapping if AI is unavailable.
    */
   static buildFallback(plan: TestPlan, elementRefs: Map<string, string>): string {
     const moduleName = plan.page.toLowerCase();
@@ -230,6 +229,48 @@ Convert ALL ${plan.testCases.length} test cases above into a single .feature fil
     });
 
     return lines.join('\n');
+  }
+
+  /**
+   * Builds a focused per-AC prompt for OpenAI.
+   * Used by GeneratorAgent when AI is available to generate steps for a single AC.
+   */
+  static buildPerACPrompt(
+    tc: PlanTestCase,
+    pageName: string,
+    availableElements: string[],
+  ): string {
+    return `Convert this test case into Gherkin steps.
+
+## Test Case
+Title: ${tc.title}
+Steps:
+${tc.steps.map((s) => `- Action: ${s.action}${s.testData ? ` | Data: ${s.testData}` : ''}${s.expected ? ` | Expected: ${s.expected}` : ''}`).join('\n')}
+
+## Available Elements (use ONLY these — do NOT invent new ones)
+${availableElements.join('\n')}
+
+## Step Patterns (use ONLY these)
+- When I click 'Page.Element'
+- When I enter 'value' into 'Page.Element'
+- When I select 'Option' from dropdown 'Page.Element'
+- Then 'Page.Element' should be visible
+- Then 'Page.Element' should have text 'expected'
+- Then 'Page.Element' should contain text 'partial'
+- Then the url should contain 'fragment'
+- When I get text from 'Page.Element' and store as 'varName'
+- When I wait N seconds
+
+## Data Syntax
+- Random data: ##FullName, ##Email, ##Password
+- Cross-scenario variables: $$variableName
+
+## Rules
+- Output ONLY Gherkin steps (no Feature/Scenario headers, no comments, no explanation)
+- One step per line, starting with When/Then/And
+- Use elements from the list above — if unsure which element to use, pick the closest match
+- For multi-field forms (name, email, password, review), generate separate enter steps for EACH field
+- Include assertion steps (Then) for each expected result`;
   }
 
   // ─── Deterministic Step Mapper ────────────────────────────────────────────

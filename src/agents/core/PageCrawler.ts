@@ -327,19 +327,35 @@ export class PageCrawler {
           else if (tag === 'textarea') elementType = 'textarea';
           else if (tag === 'a') elementType = 'link';
 
-          // Suggest a PascalCase key
-          const label = ariaLabel || placeholder || visibleText || testId || id || '';
-          const sanitized = label.replace(/[^a-zA-Z0-9\s]/g, '').trim();
-          const words = sanitized.split(/\s+/).map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase());
+          // Suggest a PascalCase key — prefer data-testid/data-qa for uniqueness
+          const keySource = testId || dataQa || dataCy || '';
+          let label = '';
+          let key = '';
 
-          let prefix = '';
-          if (elementType === 'button') prefix = 'Btn';
-          else if (elementType === 'input') prefix = 'Input';
-          else if (elementType === 'select') prefix = 'Select';
-          else if (elementType === 'textarea') prefix = 'Input';
-          else if (elementType === 'link') prefix = 'Nav';
-
-          const key = prefix + words.slice(0, 3).join('') || `Element${results.length + 1}`;
+          if (keySource) {
+            // Use data attribute for key: "login-email" → "LoginEmail"
+            label = keySource;
+            const keyWords = keySource.split(/[-_\s]+/).map((w: string) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase());
+            let prefix = '';
+            if (elementType === 'button') prefix = 'Btn';
+            else if (elementType === 'input') prefix = 'Input';
+            else if (elementType === 'select') prefix = 'Select';
+            else if (elementType === 'textarea') prefix = 'Input';
+            else if (elementType === 'link') prefix = 'Nav';
+            key = prefix + keyWords.join('');
+          } else {
+            // Fallback to label/placeholder/visible text
+            label = ariaLabel || placeholder || visibleText || id || '';
+            const sanitized = label.replace(/[^a-zA-Z0-9\s]/g, '').trim();
+            const words = sanitized.split(/\s+/).map((w: string) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase());
+            let prefix = '';
+            if (elementType === 'button') prefix = 'Btn';
+            else if (elementType === 'input') prefix = 'Input';
+            else if (elementType === 'select') prefix = 'Select';
+            else if (elementType === 'textarea') prefix = 'Input';
+            else if (elementType === 'link') prefix = 'Nav';
+            key = prefix + words.slice(0, 3).join('') || `Element${results.length + 1}`;
+          }
 
           results.push({
             key,

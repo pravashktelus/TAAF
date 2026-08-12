@@ -183,7 +183,7 @@ async function testPlanPrompts(): Promise<void> {
 
   const tcPrompt = PlanPrompts.buildTestCasesPrompt(tcInput, 'Orders');
   assert(tcPrompt.includes('TC-001'), 'testcases prompt includes TC ID');
-  assert(tcPrompt.includes('preserve'), 'testcases prompt says preserve');
+  assert(tcPrompt.includes('PRESERVE') || tcPrompt.includes('preserve'), 'testcases prompt says preserve');
 
   const storyFallback = PlanPrompts.buildStoryFallback('Orders');
   assert(storyFallback.includes('Orders'), 'story fallback includes page name');

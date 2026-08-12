@@ -263,6 +263,8 @@ export class PageCrawler {
           let locatorType = '';
 
           const testId = htmlEl.getAttribute('data-testid');
+          const dataQa = htmlEl.getAttribute('data-qa');
+          const dataCy = htmlEl.getAttribute('data-cy');
           const id = htmlEl.getAttribute('id');
           const placeholder = htmlEl.getAttribute('placeholder');
           const ariaLabel = htmlEl.getAttribute('aria-label');
@@ -273,6 +275,12 @@ export class PageCrawler {
           if (testId) {
             locator = `//${el.tagName.toLowerCase()}[@data-testid='${testId}']`;
             locatorType = 'data-testid';
+          } else if (dataQa) {
+            locator = `//${el.tagName.toLowerCase()}[@data-qa='${dataQa}']`;
+            locatorType = 'data-qa';
+          } else if (dataCy) {
+            locator = `//${el.tagName.toLowerCase()}[@data-cy='${dataCy}']`;
+            locatorType = 'data-cy';
           } else if (id) {
             locator = `#${id}`;
             locatorType = 'id';

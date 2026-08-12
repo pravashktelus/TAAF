@@ -410,7 +410,7 @@ Verify the agent module is working correctly:
 npm run agent:test
 ```
 
-Expected: `105 passed, 0 failed`
+Expected: All assertions pass with `0 failed`.
 
 ---
 

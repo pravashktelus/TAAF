@@ -114,36 +114,34 @@ function _extractUrlsFromPlan(plan: TestPlan): string[] {
   return [...found];
 }
 
-// ─── Helper: Extract TODO elements from generated feature ────────────────────
+// ─── Helper: Detect unresolved element refs in generated feature ─────────────
 
-function _extractTodoElements(
+function _detectUnresolvedElements(
   featureContent: string,
   pageName: string,
+  registry: PropertiesRegistry,
   pageUrl: string = ''
-): (DiscoveredElement & { source: string })[] {
+): string[] {
   const seen = new Set<string>();
-  const results: (DiscoveredElement & { source: string })[] = [];
-  const urlHint = pageUrl ? ` | Verify at: ${pageUrl}` : ' | Add URL to plan for auto-crawl';
+  const unresolved: string[] = [];
 
   // Match 'PageName.ElementKey' refs where PageName matches current page
   const refPattern = new RegExp(`'${pageName}\\.(\\w+)'`, 'g');
   let match;
   while ((match = refPattern.exec(featureContent)) !== null) {
     const key = match[1];
-    if (key !== 'ElementKey' && !seen.has(key)) {
-      seen.add(key);
-      results.push({
-        key,
-        locator: `# TODO: Add locator for ${key}${urlHint}`,
-        type: 'unknown',
-        label: key,
-        tag: 'unknown',
-        source: 'new',
-      });
+    if (key === 'ElementKey' || seen.has(key)) continue;
+    seen.add(key);
+
+    // Check if this element already exists in registry
+    const existingElements = registry.getPageElements(pageName);
+    const exists = existingElements.some((el) => el.elementKey === key);
+    if (!exists) {
+      unresolved.push(key);
     }
   }
 
-  return results;
+  return unresolved;
 }
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
@@ -346,12 +344,14 @@ async function run(): Promise<void> {
   const isAIGenerated = featureContent !== fallback && featureContent.length > 0;
   console.log(`[GeneratorAgent] Feature file: ${isAIGenerated ? 'AI-generated' : 'fallback template'}`);
 
-  // ── Step 7: Parse any new element refs from feature + update properties ────
-  const todoElements = _extractTodoElements(featureContent, plan.page, plan.url || '');
-  if (todoElements.length > 0) {
-    console.log(`[GeneratorAgent] ${todoElements.length} new element ref(s) found in feature → adding to ${plan.page}.properties`);
-    const propsPath = propertiesWriter.write(plan.page, todoElements as any);
-    if (!writtenProps.includes(propsPath)) writtenProps.push(propsPath);
+  // ── Step 7: Detect unresolved element refs in feature (warn, don't write TODOs) ─
+  const unresolvedElements = _detectUnresolvedElements(featureContent, plan.page, registry, plan.url || '');
+  if (unresolvedElements.length > 0) {
+    const urlHint = plan.url ? `\n  Crawl the page: npm run agent:generate -- --plan ${args.plan} --url ${plan.url}` : '';
+    console.warn(`\n[GeneratorAgent] ⚠️  ${unresolvedElements.length} element(s) referenced in feature but NOT in ${plan.page}.properties:`);
+    unresolvedElements.forEach((key) => console.warn(`    - ${plan.page}.${key}`));
+    console.warn(`  These elements need real locators before tests will pass.`);
+    console.warn(`  Fix: Use Playwright MCP or provide --url to crawl the live DOM.${urlHint}\n`);
   }
 
   // ── Step 8: Write feature file ─────────────────────────────────────────────
@@ -460,42 +460,14 @@ function _buildConventionElements(
   plan: TestPlan,
   elementRefs: Map<string, string>
 ): (DiscoveredElement & { source: string })[] {
-  const propertiesPath = path.resolve(
-    process.cwd(), 'src', 'pages', 'properties', `${plan.page}.properties`
-  );
-
-  if (fs.existsSync(propertiesPath)) return [];
-
-  const urlHint = plan.url ? ` | Verify at: ${plan.url}` : ' | Provide --url for auto-crawl';
-  const actionKeywords = new Set<string>();
-  plan.testCases.forEach((tc) => {
-    tc.steps.forEach((s) => {
-      const words = s.action.split(/\s+/);
-      words.forEach((w) => {
-        if (w.length > 3) actionKeywords.add(w.charAt(0).toUpperCase() + w.slice(1).toLowerCase());
-      });
-    });
-  });
-
-  const conventionElements: (DiscoveredElement & { source: string })[] = [];
-  const seen = new Set<string>();
-
-  actionKeywords.forEach((word) => {
-    const key = `Btn${word}`;
-    if (!seen.has(key) && !elementRefs.has(key)) {
-      seen.add(key);
-      conventionElements.push({
-        key,
-        locator: `# TODO: Add locator for ${key}${urlHint}`,
-        type: 'button',
-        label: word,
-        tag: 'button',
-        source: 'new',
-      });
-    }
-  });
-
-  return conventionElements.slice(0, 10);
+  // Convention-based element generation is DISABLED.
+  // Writing TODO/placeholder locators to .properties files causes runtime failures.
+  // Instead, the user should provide --url for live DOM crawling.
+  if (plan.testCases.length > 0) {
+    console.log('[GeneratorAgent] ℹ️  No URL provided and no existing .properties for this page.');
+    console.log('[GeneratorAgent] ℹ️  Provide --url to auto-crawl real locators, or create the properties file manually using Playwright MCP.');
+  }
+  return [];
 }
 
 // ─── Entry Point ──────────────────────────────────────────────────────────────

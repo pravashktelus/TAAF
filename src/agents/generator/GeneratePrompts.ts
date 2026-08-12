@@ -135,7 +135,7 @@ Feature: <PageName> - <Short Description>
     sections.push('\n## CRITICAL: Available Element References');
     sections.push('You MUST use ONLY these exact element references. NEVER invent page names like LoginPage, OrdersPage, SupportPage.');
     sections.push('NEVER use Support.ElementKey as a placeholder — use the REAL refs listed below.');
-    sections.push(`For any element genuinely NOT listed here, use '${plan.page}.ElementKey' with a # TODO comment.\n`);
+    sections.push(`For any element genuinely NOT listed here, use '${plan.page}.ElementKey' — the locator will need to be added to .properties separately.\n`);
 
     if (elementRefs.size > 0) {
       // Group by page name for clarity
@@ -157,9 +157,9 @@ Feature: <PageName> - <Short Description>
       sections.push(`## How to use existing refs:`);
       sections.push(`- Login steps → use CustomerSupport.SigninEmail, CustomerSupport.SigninPassword, CustomerSupport.BtnSignIn`);
       sections.push(`- Navigation → use CustomerSupport.NavOrders, CustomerSupport.BtnViewDetails etc.`);
-      sections.push(`- New elements not in list → use '${plan.page}.ElementKey' # TODO: Add locator`);
+      sections.push(`- New elements not in list → use '${plan.page}.ElementKey' (must exist in .properties file)`);
     } else {
-      sections.push(`  WARNING: No existing elements found. Use '${plan.page}.ElementKey' with # TODO comments.`);
+      sections.push(`  WARNING: No existing elements found. Use '${plan.page}.ElementKey' refs — locators must be added to .properties via Playwright MCP or --url crawl.`);
     }
 
     // Explicit page naming rule
@@ -186,7 +186,8 @@ Feature: <PageName> - <Short Description>
 Convert ALL ${plan.testCases.length} test cases above into a single .feature file.
 - Use ONLY the step patterns listed above — do not invent new step patterns
 - Use ONLY element references from the "Available Element References" section above
-- For missing elements: '${plan.page}.ElementKey' with a # TODO comment
+- For missing elements: use '${plan.page}.ElementKey' format (locator will be added to .properties separately)
+- NEVER append # TODO comments to step lines — they break Cucumber regex matching
 - Follow the feature file conventions exactly
 - Add comment headers (# ═══ SECTION ═══) to group steps
 - Output ONLY the .feature file content — no explanation, no markdown fences`);

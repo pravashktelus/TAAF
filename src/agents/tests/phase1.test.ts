@@ -185,7 +185,7 @@ async function testPlanPrompts(): Promise<void> {
   assert(tcPrompt.includes('TC-001'), 'testcases prompt includes TC ID');
   assert(tcPrompt.includes('PRESERVE') || tcPrompt.includes('preserve'), 'testcases prompt says preserve');
 
-  const storyFallback = PlanPrompts.buildStoryFallback('Orders');
+  const storyFallback = PlanPrompts.buildStoryFallback('Orders', undefined, '');
   assert(storyFallback.includes('Orders'), 'story fallback includes page name');
   assert(storyFallback.includes('aiGenerated'), 'story fallback is valid JSON-like');
 
@@ -387,7 +387,8 @@ async function testGeneratePrompts(): Promise<void> {
   const fallback = GeneratePrompts.buildFallback(mockPlan as any, elementRefs);
   assert(fallback.includes('@web @support_web'), 'Fallback has correct tags');
   assert(fallback.includes('TC-001'), 'Fallback includes TC ID');
-  assert(fallback.includes('TODO'), 'Fallback has TODO markers');
+  assert(fallback.includes('Given I navigate to the application'), 'Fallback has navigation step');
+  assert(fallback.includes('Scenario:'), 'Fallback has scenario keyword');
 
   assert(typeof GeneratePrompts.SYSTEM_PROMPT === 'string' && GeneratePrompts.SYSTEM_PROMPT.length > 0, 'SYSTEM_PROMPT non-empty');
   assert(typeof GeneratePrompts.STEP_PATTERNS === 'string' && GeneratePrompts.STEP_PATTERNS.length > 0, 'STEP_PATTERNS non-empty');

@@ -229,7 +229,7 @@ async function run(): Promise<void> {
     } else if (storyInput) {
       // Story mode — AI generates test cases
       prompt = PlanPrompts.buildStoryPrompt(storyInput, page, pageSnapshot, frameworkContext);
-      fallback = PlanPrompts.buildStoryFallback(page, pageSnapshot);
+      fallback = PlanPrompts.buildStoryFallback(page, pageSnapshot, storyInput.mainContent);
 
       console.log(`[PlannerAgent] Sending to ${config.aiEnabled ? config.aiProvider : 'fallback'}...`);
       aiResponse = await LLMClient.askWithSystem(PlanPrompts.SYSTEM_PROMPT, prompt, fallback);
@@ -242,7 +242,7 @@ async function run(): Promise<void> {
         pageSnapshot,
         frameworkContext
       );
-      fallback = PlanPrompts.buildStoryFallback(page, pageSnapshot);
+      fallback = PlanPrompts.buildStoryFallback(page, pageSnapshot, '');
 
       console.log(`[PlannerAgent] Sending to ${config.aiEnabled ? config.aiProvider : 'fallback'}...`);
       aiResponse = await LLMClient.askWithSystem(PlanPrompts.SYSTEM_PROMPT, prompt, fallback);

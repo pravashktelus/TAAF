@@ -143,41 +143,197 @@ ${this._getOutputSchema(pageName)}`);
 
   /**
    * Fallback template for story mode when AI is unavailable.
-   * Returns a structured plan with discovered elements but no AI-generated scenarios.
+   * Now uses deterministic AC parsing: extracts acceptance criteria from the story
+   * and maps them directly to test cases (P4 fix).
    */
-  static buildStoryFallback(pageName: string, pageSnapshot?: PageSnapshot): string {
+  static buildStoryFallback(pageName: string, pageSnapshot?: PageSnapshot, storyContent?: string): string {
     const elements = pageSnapshot?.elements || [];
-    const elementList = elements.length > 0
-      ? elements.map((e) => `  - [${e.type}] ${e.key}: ${e.locator}`).join('\n')
-      : '  - No elements discovered (provide --url to enable live page crawling)';
 
+    // P4: Attempt to extract acceptance criteria deterministically
+    const parsedACs = storyContent ? this._parseAcceptanceCriteria(storyContent) : [];
+
+    if (parsedACs.length > 0) {
+      // Build test cases from parsed ACs
+      return JSON.stringify({
+        page: pageName,
+        url: pageSnapshot?.url || '',
+        mode: 'story',
+        aiGenerated: false,
+        note: 'Built from parsed acceptance criteria (deterministic).',
+        elements: pageSnapshot?.elements || [],
+        testCases: parsedACs.map((ac, index) => ({
+          id: `TC-${String(index + 1).padStart(3, '0')}`,
+          title: ac.title,
+          type: index === 0 ? 'happy_path' : (ac.title.toLowerCase().includes('negative') || ac.title.toLowerCase().includes('invalid') || ac.title.toLowerCase().includes('incorrect') || ac.title.toLowerCase().includes('without') ? 'negative' : 'happy_path'),
+          navigation: '',
+          steps: ac.steps.map((step, si) => ({
+            stepNo: si + 1,
+            action: step.action,
+            navigation: '',
+            testData: step.testData,
+            expected: step.expected,
+          })),
+          edgeCases: [],
+        })),
+      }, null, 2);
+    }
+
+    // Original fallback (no ACs found in story)
     return JSON.stringify({
       page: pageName,
       url: pageSnapshot?.url || '',
       mode: 'story',
       aiGenerated: false,
-      note: 'AI unavailable — template output. Add OPENAI_API_KEY to enable AI generation.',
+      note: 'AI unavailable and no parseable ACs found. Add OPENAI_API_KEY to enable AI generation.',
       elements: pageSnapshot?.elements || [],
       testCases: [
         {
           id: 'TC-001',
-          title: `${pageName} - Happy Path (TODO: fill in from story)`,
+          title: `${pageName} - Happy Path`,
           type: 'happy_path',
-          navigation: 'TODO: Add navigation path',
+          navigation: '',
           steps: [
             {
               stepNo: 1,
-              action: 'TODO: Add step action',
+              action: 'Navigate to the application',
               navigation: '',
               testData: '',
-              expected: 'TODO: Add expected result',
+              expected: 'Application is accessible',
             },
           ],
           edgeCases: [],
         },
       ],
-      discoveredElements: elementList,
     }, null, 2);
+  }
+
+  // ─── P4: Acceptance Criteria Parser ───────────────────────────────────────
+
+  /**
+   * Deterministically extracts acceptance criteria from a story's text content.
+   * Looks for patterns like:
+   *   - "AC-1: Title" or "### AC-1: Title"
+   *   - Numbered ACs: "1. Title" under "Acceptance Criteria:" heading
+   *   - Given/When/Then steps within each AC
+   *
+   * Returns structured test cases ready for plan JSON.
+   */
+  static _parseAcceptanceCriteria(content: string): {
+    title: string;
+    steps: { action: string; testData: string; expected: string }[];
+  }[] {
+    const results: { title: string; steps: { action: string; testData: string; expected: string }[] }[] = [];
+
+    // Find the "Acceptance Criteria" section
+    const acSectionMatch = content.match(/(?:Acceptance\s+Criteria|ACs?)[\s:]*\n([\s\S]*?)(?=\n##\s|\n\*\*[A-Z]|\nTest\s+Data|\nTags|\nNotes|\nPre-conditions|$)/i);
+    if (!acSectionMatch) return results;
+
+    const acSection = acSectionMatch[1];
+
+    // Split by AC headers: "### AC-1:", "AC-1:", or numbered list "1."
+    const acPattern = /(?:^|\n)(?:#{1,3}\s*)?(?:AC-?\d+[\s:.]+|(\d+)\.\s+)([^\n]+)/gi;
+    const acHeaders: { index: number; title: string }[] = [];
+    let match;
+
+    while ((match = acPattern.exec(acSection)) !== null) {
+      const title = match[2]?.trim() || match[0].replace(/^[\s#]*(?:AC-?\d+[\s:.]+|\d+\.\s+)/, '').trim();
+      acHeaders.push({ index: match.index, title });
+    }
+
+    if (acHeaders.length === 0) return results;
+
+    // Extract steps for each AC
+    for (let i = 0; i < acHeaders.length; i++) {
+      const startIdx = acHeaders[i].index;
+      const endIdx = i + 1 < acHeaders.length ? acHeaders[i + 1].index : acSection.length;
+      const acBody = acSection.substring(startIdx, endIdx);
+
+      const steps = this._parseACSteps(acBody);
+      results.push({
+        title: acHeaders[i].title,
+        steps,
+      });
+    }
+
+    return results;
+  }
+
+  /**
+   * Parses Given/When/Then steps from an AC body text.
+   */
+  private static _parseACSteps(acBody: string): { action: string; testData: string; expected: string }[] {
+    const steps: { action: string; testData: string; expected: string }[] = [];
+    const lines = acBody.split('\n').map((l) => l.replace(/^[-*•]\s*/, '').trim()).filter(Boolean);
+
+    let currentAction = '';
+    let currentTestData = '';
+    let currentExpected = '';
+
+    for (const line of lines) {
+      // Skip the AC header line itself
+      if (line.match(/^(?:#{1,3}\s*)?(?:AC-?\d+|^\d+\.)/i)) continue;
+
+      const gwt = line.match(/^(?:Given|When|And|But|Then)\s+(.*)/i);
+
+      if (gwt) {
+        const keyword = line.match(/^(Given|When|And|But|Then)/i)![1].toLowerCase();
+        const text = gwt[1].trim();
+
+        if (keyword === 'then') {
+          // This is an expected result — flush previous action if any
+          if (currentAction) {
+            steps.push({ action: currentAction, testData: currentTestData, expected: currentExpected });
+            currentAction = '';
+            currentTestData = '';
+            currentExpected = '';
+          }
+          currentExpected = text;
+          // If no action precedes this Then, make the Then itself an action
+          if (steps.length === 0 && !currentAction) {
+            currentAction = `Verify: ${text}`;
+          }
+        } else if (keyword === 'given' || keyword === 'when') {
+          // Flush previous step
+          if (currentAction) {
+            steps.push({ action: currentAction, testData: currentTestData, expected: currentExpected });
+            currentExpected = '';
+            currentTestData = '';
+          }
+          currentAction = text;
+
+          // Extract inline test data (quoted values)
+          const dataMatch = text.match(/[""]([^""]+)[""]/);
+          if (dataMatch) currentTestData = dataMatch[1];
+        } else if (keyword === 'and' || keyword === 'but') {
+          // "And" could be additional action or additional assertion
+          if (currentExpected) {
+            // Previous was a Then — this And is continuation of expected
+            steps.push({ action: currentAction || `Verify: ${currentExpected}`, testData: currentTestData, expected: currentExpected });
+            currentAction = text;
+            currentExpected = '';
+            currentTestData = '';
+            const dataMatch = text.match(/[""]([^""]+)[""]/);
+            if (dataMatch) currentTestData = dataMatch[1];
+          } else {
+            // Previous was a When — this And is continuation of action
+            if (currentAction) {
+              steps.push({ action: currentAction, testData: currentTestData, expected: '' });
+            }
+            currentAction = text;
+            currentTestData = '';
+            const dataMatch = text.match(/[""]([^""]+)[""]/);
+            if (dataMatch) currentTestData = dataMatch[1];
+          }
+        }
+      }
+    }
+
+    // Flush final step
+    if (currentAction || currentExpected) {
+      steps.push({ action: currentAction || `Verify: ${currentExpected}`, testData: currentTestData, expected: currentExpected });
+    }
+
+    return steps;
   }
 
   /**

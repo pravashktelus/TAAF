@@ -5,6 +5,7 @@ import { LLMClient } from '../core/LLMClient';
 import { PageCrawler, PageSnapshot, DiscoveredElement } from '../core/PageCrawler';
 import { PropertiesRegistry } from '../core/PropertiesRegistry';
 import { ContextEnricher } from '../core/ContextEnricher';
+import { OutputValidator } from '../core/OutputValidator';
 import { PropertiesWriter } from './PropertiesWriter';
 import { FeatureWriter } from './FeatureWriter';
 import { GeneratePrompts } from './GeneratePrompts';
@@ -352,6 +353,17 @@ async function run(): Promise<void> {
     unresolvedElements.forEach((key) => console.warn(`    - ${plan.page}.${key}`));
     console.warn(`  These elements need real locators before tests will pass.`);
     console.warn(`  Fix: Use Playwright MCP or provide --url to crawl the live DOM.${urlHint}\n`);
+  }
+
+  // ── Step 7b: Validate output (P6 — gate before --apply) ───────────────────
+  const validator = new OutputValidator(registry);
+  const validation = validator.validate(featureContent, plan, args.apply);
+  validator.printResults(validation);
+
+  if (!validation.valid && args.apply) {
+    console.error('[GeneratorAgent] ❌ Cannot apply — validation failed. Fix errors above first.');
+    console.error('[GeneratorAgent] Run without --apply to generate a review copy instead.');
+    process.exit(1);
   }
 
   // ── Step 8: Write feature file ─────────────────────────────────────────────

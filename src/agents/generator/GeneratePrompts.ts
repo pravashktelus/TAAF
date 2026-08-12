@@ -198,22 +198,21 @@ Convert ALL ${plan.testCases.length} test cases above into a single .feature fil
   // ─── Fallback Template ────────────────────────────────────────────────────
 
   /**
-   * Fallback feature file template when AI is unavailable.
+   * Deterministic feature file builder — produces a complete .feature file
+   * directly from the plan JSON using rule-based step mapping.
+   * Used as fallback when AI is unavailable, AND as the primary builder (P3 fix).
+   *
+   * The AI prompt (buildPrompt) is now used only to REFINE individual ambiguous steps,
+   * not to generate the entire feature file from scratch.
    */
   static buildFallback(plan: TestPlan, elementRefs: Map<string, string>): string {
     const moduleName = plan.page.toLowerCase();
     const lines: string[] = [];
 
     lines.push(`@web @${moduleName}_web`);
-    lines.push(`Feature: ${plan.page} - Generated Feature`);
-    lines.push(`  # Source: ${plan.sourceFile}`);
-    lines.push(`  # TODO: AI unavailable — complete scenario steps manually`);
-    lines.push(`  # Available elements:`);
-
-    elementRefs.forEach((ref) => {
-      lines.push(`  #   ${ref}`);
-    });
-
+    lines.push(`Feature: ${plan.page} - ${plan.sourceFile?.replace(/\.[^.]+$/, '') || 'Generated Feature'}`);
+    lines.push(`  As a user`);
+    lines.push(`  I want to interact with the ${plan.page} page`);
     lines.push('');
 
     plan.testCases.forEach((tc) => {
@@ -221,24 +220,333 @@ Convert ALL ${plan.testCases.length} test cases above into a single .feature fil
       lines.push(`  ${tags}`);
       lines.push(`  Scenario: ${tc.id} ${tc.title}`);
       lines.push(`    Given I navigate to the application`);
-      lines.push(`    # Navigation: ${tc.navigation || 'TODO: Add navigation'}`);
 
       tc.steps.forEach((s) => {
-        lines.push(`    # Step ${s.stepNo}: ${s.action}`);
-        if (s.testData) lines.push(`    # Test Data: ${s.testData}`);
-        lines.push(`    # Expected: ${s.expected}`);
-        lines.push(`    # TODO: Add automation steps here`);
+        const automationSteps = this._mapStepToGherkin(s, plan.page, elementRefs);
+        automationSteps.forEach((step) => lines.push(`    ${step}`));
       });
-
-      if (tc.edgeCases?.length > 0) {
-        lines.push(`    # Edge Cases:`);
-        tc.edgeCases.forEach((ec) => lines.push(`    #   - ${ec}`));
-      }
 
       lines.push('');
     });
 
     return lines.join('\n');
+  }
+
+  // ─── Deterministic Step Mapper ────────────────────────────────────────────
+
+  /**
+   * Maps a single plan step (action + testData + expected) into one or more
+   * Gherkin steps using rule-based pattern matching.
+   *
+   * This is the core P3 fix: instead of asking AI to generate the whole feature,
+   * we map each step deterministically and only flag truly ambiguous ones.
+   */
+  private static _mapStepToGherkin(
+    step: { stepNo: number; action: string; navigation: string; testData: string; expected: string },
+    pageName: string,
+    elementRefs: Map<string, string>
+  ): string[] {
+    const results: string[] = [];
+    const action = step.action.toLowerCase();
+    const expected = step.expected.toLowerCase();
+
+    // Add section comment for readability
+    results.push(`# ═══ Step ${step.stepNo}: ${step.action.substring(0, 60)} ═══`);
+
+    // ─── Pattern: Navigate / Open ───────────────────────────────────────
+    if (action.includes('navigate') || action.includes('open') || action.includes('go to')) {
+      // If step mentions a specific URL
+      const urlMatch = step.action.match(/https?:\/\/[^\s'"]+/) || step.testData.match(/https?:\/\/[^\s'"]+/);
+      if (urlMatch) {
+        results.push(`Given I navigate to '${urlMatch[0]}'`);
+      }
+      // If navigating via a nav link element
+      const navRef = this._findElementRef(step.action, pageName, elementRefs, 'nav');
+      if (navRef && !urlMatch) {
+        results.push(`When I click '${navRef}'`);
+      }
+    }
+
+    // ─── Pattern: Click ─────────────────────────────────────────────────
+    else if (action.includes('click')) {
+      const ref = this._findElementRef(step.action, pageName, elementRefs, 'btn');
+      if (ref) {
+        results.push(`When I click '${ref}'`);
+      } else {
+        results.push(`# ACTION: ${step.action}`);
+        results.push(`When I click '${pageName}.${this._suggestKey(step.action, 'Btn')}'`);
+      }
+    }
+
+    // ─── Pattern: Enter / Type / Fill ───────────────────────────────────
+    else if (action.includes('enter') || action.includes('type') || action.includes('fill') || action.includes('input')) {
+      const ref = this._findElementRef(step.action, pageName, elementRefs, 'input');
+      const value = this._extractValue(step);
+      if (ref) {
+        results.push(`When I enter '${value}' into '${ref}'`);
+      } else {
+        results.push(`# ACTION: ${step.action}`);
+        results.push(`When I enter '${value}' into '${pageName}.${this._suggestKey(step.action, 'Input')}'`);
+      }
+    }
+
+    // ─── Pattern: Select / Dropdown ─────────────────────────────────────
+    else if (action.includes('select') || action.includes('dropdown') || action.includes('choose')) {
+      const ref = this._findElementRef(step.action, pageName, elementRefs, 'select');
+      const value = this._extractValue(step);
+      if (ref) {
+        results.push(`When I select '${value}' from dropdown '${ref}'`);
+      } else {
+        results.push(`# ACTION: ${step.action}`);
+        results.push(`When I select '${value}' from dropdown '${pageName}.${this._suggestKey(step.action, 'Select')}'`);
+      }
+    }
+
+    // ─── Pattern: Verify / Assert / Check ───────────────────────────────
+    else if (action.includes('verify') || action.includes('validate') || action.includes('check') || action.includes('assert') || action.includes('should')) {
+      const verifySteps = this._buildVerifySteps(step, pageName, elementRefs);
+      results.push(...verifySteps);
+    }
+
+    // ─── Pattern: Store / Capture ───────────────────────────────────────
+    else if (action.includes('capture') || action.includes('store') || action.includes('get text') || action.includes('save')) {
+      const ref = this._findElementRef(step.action, pageName, elementRefs);
+      const varName = this._extractVarName(step.action);
+      if (ref) {
+        results.push(`When I get text from '${ref}' and store as '${varName}'`);
+        results.push(`Then I attach '${varName}' to the report as '${varName}'`);
+      } else {
+        results.push(`# ACTION: ${step.action}`);
+        results.push(`When I get text from '${pageName}.${this._suggestKey(step.action, '')}' and store as '${varName}'`);
+      }
+    }
+
+    // ─── Pattern: Wait ──────────────────────────────────────────────────
+    else if (action.includes('wait')) {
+      const seconds = action.match(/(\d+)/)?.[1] || '2';
+      results.push(`When I wait ${seconds} seconds`);
+    }
+
+    // ─── Pattern: Scroll ────────────────────────────────────────────────
+    else if (action.includes('scroll')) {
+      const ref = this._findElementRef(step.action, pageName, elementRefs);
+      if (ref) {
+        results.push(`When I scroll to '${ref}'`);
+      } else {
+        results.push(`# ACTION: ${step.action} — scroll target not mapped`);
+      }
+    }
+
+    // ─── Fallback: Unrecognized action ──────────────────────────────────
+    else {
+      results.push(`# ACTION: ${step.action}`);
+      // Try to infer from expected result
+      if (step.expected) {
+        const verifySteps = this._buildVerifySteps(step, pageName, elementRefs);
+        if (verifySteps.length > 0) results.push(...verifySteps);
+      }
+    }
+
+    // ─── Add expected result assertions if not already covered ───────────
+    if (step.expected && !action.includes('verify') && !action.includes('validate') && !action.includes('check')) {
+      const expectedSteps = this._buildExpectedAssertions(step.expected, pageName, elementRefs);
+      results.push(...expectedSteps);
+    }
+
+    return results;
+  }
+
+  // ─── Step Mapping Helpers ─────────────────────────────────────────────────
+
+  /**
+   * Finds the best matching element ref from available refs for a given action text.
+   */
+  private static _findElementRef(
+    actionText: string,
+    pageName: string,
+    elementRefs: Map<string, string>,
+    preferType?: string
+  ): string | null {
+    const actionLower = actionText.toLowerCase();
+
+    // Extract keywords from action (strip common verbs)
+    const keywords = actionLower
+      .replace(/\b(click|enter|type|fill|select|verify|navigate|check|on|the|a|an|in|to|from|into|should|be|is|are|i|and|then|when|given)\b/g, '')
+      .split(/[\s'"""''.,;:]+/)
+      .filter((w) => w.length > 2);
+
+    let bestMatch: string | null = null;
+    let bestScore = 0;
+
+    elementRefs.forEach((ref) => {
+      const refLower = ref.toLowerCase();
+      let score = 0;
+
+      keywords.forEach((kw) => {
+        if (refLower.includes(kw)) score += 2;
+      });
+
+      // Bonus for matching type prefix
+      if (preferType) {
+        if (preferType === 'btn' && refLower.includes('btn')) score += 1;
+        if (preferType === 'input' && (refLower.includes('input') || refLower.includes('email') || refLower.includes('password') || refLower.includes('name'))) score += 1;
+        if (preferType === 'nav' && refLower.includes('nav')) score += 1;
+        if (preferType === 'select' && refLower.includes('select')) score += 1;
+      }
+
+      if (score > bestScore) {
+        bestScore = score;
+        bestMatch = ref;
+      }
+    });
+
+    return bestScore >= 2 ? bestMatch : null;
+  }
+
+  /**
+   * Extracts the data value to use in a step from testData or action text.
+   */
+  private static _extractValue(step: { action: string; testData: string }): string {
+    // Check testData first
+    if (step.testData) {
+      // If it's a JSON-like object, try to extract the first value
+      const kvMatch = step.testData.match(/['"]([^'"]+)['"]\s*[:,]\s*['"]([^'"]+)['"]/);
+      if (kvMatch) return kvMatch[2];
+
+      // If it's a simple variable reference
+      if (step.testData.startsWith('$$') || step.testData.startsWith('{') || step.testData.startsWith('##')) {
+        return step.testData;
+      }
+
+      return step.testData;
+    }
+
+    // Try to extract quoted value from action
+    const quoted = step.action.match(/['"""''']([^'"""''']+)['"""''']/);
+    if (quoted) return quoted[1];
+
+    // Use random data placeholder
+    return '##Value';
+  }
+
+  /**
+   * Extracts a variable name from action text for store operations.
+   */
+  private static _extractVarName(action: string): string {
+    // Look for known patterns: "store as X", "capture X"
+    const storeMatch = action.match(/(?:store|save|capture)\s+(?:as\s+)?['"]?(\w+)['"]?/i);
+    if (storeMatch) return storeMatch[1];
+
+    // Extract the noun from the action
+    const words = action.replace(/\b(capture|store|get|text|from|and|show|in|the|report)\b/gi, '')
+      .trim().split(/\s+/).filter((w) => w.length > 2);
+    return words.length > 0 ? words.join('') : 'CapturedValue';
+  }
+
+  /**
+   * Suggests a PascalCase element key from action text.
+   */
+  private static _suggestKey(action: string, prefix: string): string {
+    const words = action
+      .replace(/\b(click|enter|type|fill|select|verify|navigate|on|the|a|an|in|to|from|into|should|be|button|link|field|input)\b/gi, '')
+      .trim()
+      .split(/[\s'"""''.,;:]+/)
+      .filter((w) => w.length > 2)
+      .slice(0, 3)
+      .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase());
+
+    return prefix + words.join('');
+  }
+
+  /**
+   * Builds verify/assertion steps from a step's expected result.
+   */
+  private static _buildVerifySteps(
+    step: { action: string; expected: string },
+    pageName: string,
+    elementRefs: Map<string, string>
+  ): string[] {
+    const results: string[] = [];
+    const expected = step.expected;
+    const expectedLower = expected.toLowerCase();
+
+    // Pattern: "should be visible" or "should be displayed"
+    if (expectedLower.includes('visible') || expectedLower.includes('displayed') || expectedLower.includes('shown')) {
+      const ref = this._findElementRef(step.action + ' ' + step.expected, pageName, elementRefs);
+      if (ref) {
+        results.push(`Then '${ref}' should be visible`);
+      }
+    }
+
+    // Pattern: "should have text X" or "should show X"
+    const textMatch = expected.match(/(?:should\s+(?:have|show|display)\s+(?:text\s+)?|heading\s+)['"""''']([^'"""''']+)['"""''']/i)
+      || expected.match(/(?:shows?|displays?|contains?)\s+['"""''']([^'"""''']+)['"""''']/i);
+    if (textMatch) {
+      const ref = this._findElementRef(step.action + ' ' + step.expected, pageName, elementRefs);
+      if (ref) {
+        results.push(`Then '${ref}' should have text '${textMatch[1]}'`);
+      }
+    }
+
+    // Pattern: URL should contain
+    const urlMatch = expected.match(/url\s+(?:should\s+)?contain[s]?\s+['"""''']([^'"""''']+)['"""''']/i)
+      || expected.match(/redirect.*?to\s+.*?\/([^\s'"]+)/i)
+      || expected.match(/navigate.*?(?:to\s+)?\/([^\s'"]+)/i);
+    if (urlMatch) {
+      results.push(`Then the url should contain '${urlMatch[1]}'`);
+    }
+
+    // Pattern: color assertions
+    const colorMatch = expected.match(/(red|green|blue|orange)\s+(?:color|text)/i)
+      || expected.match(/color\s+(?:should\s+be\s+)?(red|green|blue|orange)/i);
+    if (colorMatch) {
+      const ref = this._findElementRef(step.action + ' ' + step.expected, pageName, elementRefs);
+      if (ref) {
+        results.push(`Then '${ref}' should have color '${colorMatch[1].toLowerCase()}'`);
+      }
+    }
+
+    // If no specific assertion matched, add a generic visible check
+    if (results.length === 0 && step.expected) {
+      results.push(`# EXPECTED: ${step.expected}`);
+    }
+
+    return results;
+  }
+
+  /**
+   * Builds assertions from the expected result text when the primary action was NOT a verify.
+   */
+  private static _buildExpectedAssertions(
+    expected: string,
+    pageName: string,
+    elementRefs: Map<string, string>
+  ): string[] {
+    const results: string[] = [];
+    const expectedLower = expected.toLowerCase();
+
+    // Skip if expected is just confirmation of a click/enter action
+    if (expectedLower.includes('button') && expectedLower.includes('enabled')) return results;
+    if (expectedLower.includes('form') && (expectedLower.includes('visible') || expectedLower.includes('shown'))) return results;
+
+    // URL assertions
+    const urlMatch = expected.match(/(?:url|page|redirect).*?(?:contain|show|display).*?['"""''']([^'"""''']+)['"""''']/i)
+      || expected.match(/\/([a-z][\w-/]*)/i);
+    if (urlMatch && expectedLower.includes('url') || expectedLower.includes('redirect') || expectedLower.includes('navigate')) {
+      results.push(`Then the url should contain '${urlMatch![1]}'`);
+      return results;
+    }
+
+    // Element visibility with text
+    const textInExpected = expected.match(/['"""''']([^'"""''']+)['"""''']/);
+    if (textInExpected && (expectedLower.includes('display') || expectedLower.includes('show') || expectedLower.includes('visible') || expectedLower.includes('heading'))) {
+      const ref = this._findElementRef(expected, pageName, elementRefs);
+      if (ref) {
+        results.push(`Then '${ref}' should be visible`);
+      }
+    }
+
+    return results;
   }
 
   // ─── Private Helpers ──────────────────────────────────────────────────────

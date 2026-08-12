@@ -251,39 +251,70 @@ Convert ALL ${plan.testCases.length} test cases above into a single .feature fil
     // Add section comment
     results.push(`# ═══ Step ${step.stepNo}: ${step.action.substring(0, 60)} ═══`);
 
-    // ─── Pattern: Login/Credentials (compound — split into email + password + submit) ─
+    // ─── Split compound actions ("enter X and click Y") ─────────────────
+    if (action.includes(' and ') && (action.includes('enter') || action.includes('type')) && action.includes('click')) {
+      const parts = step.action.split(/\s+and\s+/i);
+      for (const part of parts) {
+        const subStep = { ...step, action: part.trim(), stepNo: step.stepNo };
+        const subResults = this._mapSingleAction(subStep, pageName, elementRefs);
+        results.push(...subResults);
+      }
+      // Add assertions from expected
+      if (step.expected) {
+        const assertions = this._mapExpectedToAssertions(step.expected, pageName, elementRefs);
+        results.push(...assertions);
+      }
+      return results;
+    }
+
+    // ─── Single action mapping ──────────────────────────────────────────
+    const actionSteps = this._mapSingleAction(step, pageName, elementRefs);
+    results.push(...actionSteps);
+
+    // ─── Always map expected results to assertions ──────────────────────
+    if (step.expected) {
+      const assertions = this._mapExpectedToAssertions(step.expected, pageName, elementRefs);
+      results.push(...assertions);
+    }
+
+    return results;
+  }
+
+  /**
+   * Maps a single (non-compound) action to Gherkin steps.
+   */
+  private static _mapSingleAction(
+    step: { action: string; testData: string; expected: string },
+    pageName: string,
+    elementRefs: Map<string, string>
+  ): string[] {
+    const results: string[] = [];
+    const action = step.action.toLowerCase();
+
+    // ─── Pattern: Login/Credentials ─────────────────────────────────────
     if ((action.includes('credential') || (action.includes('enter') && action.includes('login'))) && !action.includes('navigate')) {
       const emailRef = this._findByRole(elementRefs, 'login', 'email') || this._findByRole(elementRefs, 'signin', 'email');
       const passRef = this._findByRole(elementRefs, 'login', 'password') || this._findByRole(elementRefs, 'signin', 'password');
-
-      // Parse testData for email/password values
       const { email, password } = this._parseCredentials(step.testData);
-
       if (emailRef) results.push(`When I enter '${email}' into '${emailRef}'`);
       if (passRef) results.push(`When I enter '${password}' into '${passRef}'`);
       return results;
     }
 
     // ─── Pattern: Click Sign In / Submit / Login button ─────────────────
-    if (action.includes('sign in') || action.includes('signin') || (action.includes('click') && action.includes('login'))) {
-      const ref = this._findByRole(elementRefs, 'login', 'submit') || this._findByRole(elementRefs, 'signin', 'submit');
-      if (ref) {
-        results.push(`When I click '${ref}'`);
-      } else {
-        results.push(`When I click '${pageName}.BtnSignIn'`);
-      }
+    if (action.includes('sign in') || action.includes('signin') || (action.includes('click') && action.includes('login') && !action.includes('signup'))) {
+      const ref = this._findByRole(elementRefs, 'login', 'submit') || this._findByRole(elementRefs, 'btn', 'login');
+      if (ref) results.push(`When I click '${ref}'`);
+      else results.push(`When I click '${pageName}.BtnLogin'`);
       return results;
     }
 
-    // ─── Pattern: Navigate / Click navigation link ──────────────────────
-    if (action.includes('navigation link') || action.includes('nav link') || action.includes('menu')) {
+    // ─── Pattern: Click navigation link ─────────────────────────────────
+    if (action.includes('navigation link') || action.includes('nav link') || action.includes('in the navigation')) {
       const navTarget = this._extractNavTarget(step.action);
       const ref = this._findByRole(elementRefs, 'nav', navTarget);
-      if (ref) {
-        results.push(`When I click '${ref}'`);
-      } else {
-        results.push(`When I click '${pageName}.Nav${this._capitalize(navTarget)}'`);
-      }
+      if (ref) results.push(`When I click '${ref}'`);
+      else results.push(`When I click '${pageName}.Nav${this._capitalize(navTarget)}'`);
       return results;
     }
 
@@ -293,71 +324,48 @@ Convert ALL ${plan.testCases.length} test cases above into a single .feature fil
       const ref = this._findByRole(elementRefs, 'btn', target)
         || this._findByRole(elementRefs, 'nav', target)
         || this._findByKeyword(elementRefs, target);
-      if (ref) {
-        results.push(`When I click '${ref}'`);
-      } else {
-        results.push(`When I click '${pageName}.Btn${this._capitalize(target)}'`);
-      }
+      if (ref) results.push(`When I click '${ref}'`);
+      else results.push(`When I click '${pageName}.Btn${this._capitalize(target)}'`);
       return results;
     }
 
     // ─── Pattern: Navigate to application ───────────────────────────────
-    if (action.includes('navigate') && (action.includes('application') || action.includes('login page'))) {
-      // Already handled by the "Given I navigate to the application" at scenario start
+    if (action.includes('navigate') && (action.includes('application') || action.includes('login page') || action.includes('homepage'))) {
+      // Already handled by "Given I navigate to the application" at scenario start
       return results;
     }
 
     // ─── Pattern: Navigate to URL ───────────────────────────────────────
     if (action.includes('navigate') || action.includes('go to') || action.includes('open')) {
       const urlMatch = step.action.match(/https?:\/\/[^\s'"]+/) || step.testData.match(/https?:\/\/[^\s'"]+/);
-      if (urlMatch) {
-        results.push(`Given I navigate to '${urlMatch[0]}'`);
-      }
+      if (urlMatch) results.push(`Given I navigate to '${urlMatch[0]}'`);
       return results;
     }
 
-    // ─── Pattern: Enter / Type into specific field ──────────────────────
+    // ─── Pattern: Enter / Type into field ───────────────────────────────
     if (action.includes('enter') || action.includes('type') || action.includes('fill')) {
       const fieldHint = this._extractFieldTarget(step.action);
       const ref = this._findByRole(elementRefs, 'input', fieldHint)
         || this._findByKeyword(elementRefs, fieldHint);
       const value = this._extractSimpleValue(step);
-      if (ref) {
-        results.push(`When I enter '${value}' into '${ref}'`);
-      } else {
-        results.push(`When I enter '${value}' into '${pageName}.Input${this._capitalize(fieldHint)}'`);
-      }
+      if (ref) results.push(`When I enter '${value}' into '${ref}'`);
+      else results.push(`When I enter '${value}' into '${pageName}.Input${this._capitalize(fieldHint)}'`);
       return results;
     }
 
     // ─── Pattern: Select / Dropdown ─────────────────────────────────────
-    if (action.includes('select') || action.includes('dropdown') || action.includes('choose')) {
+    if (action.includes('select')) {
       const fieldHint = this._extractFieldTarget(step.action);
       const ref = this._findByRole(elementRefs, 'select', fieldHint);
       const value = this._extractSimpleValue(step);
-      if (ref) {
-        results.push(`When I select '${value}' from dropdown '${ref}'`);
-      } else {
-        results.push(`When I select '${value}' from dropdown '${pageName}.Select${this._capitalize(fieldHint)}'`);
-      }
+      if (ref) results.push(`When I select '${value}' from dropdown '${ref}'`);
+      else results.push(`When I select '${value}' from dropdown '${pageName}.Select${this._capitalize(fieldHint)}'`);
       return results;
     }
 
     // ─── Pattern: Verify / Validate ─────────────────────────────────────
     if (action.includes('verify') || action.includes('validate') || action.includes('check') || action.includes('should')) {
-      const target = this._extractVerifyTarget(step.action, step.expected);
-      const ref = this._findByKeyword(elementRefs, target);
-      if (ref) {
-        // Determine assertion type from expected
-        const textMatch = step.expected.match(/['"""']([^'"""']+)['"""']/);
-        if (textMatch) {
-          results.push(`Then '${ref}' should have text '${textMatch[1]}'`);
-        } else {
-          results.push(`Then '${ref}' should be visible`);
-        }
-      } else {
-        results.push(`Then '${pageName}.${this._capitalize(target)}' should be visible`);
-      }
+      // Assertions are handled in _mapExpectedToAssertions — just add a comment
       return results;
     }
 
@@ -368,9 +376,64 @@ Convert ALL ${plan.testCases.length} test cases above into a single .feature fil
       return results;
     }
 
-    // ─── Fallback: couldn't map ─────────────────────────────────────────
+    // ─── Fallback ───────────────────────────────────────────────────────
     results.push(`# ACTION: ${step.action}`);
-    if (step.expected) results.push(`# EXPECTED: ${step.expected}`);
+    return results;
+  }
+
+  /**
+   * Maps the expected result text into assertion Gherkin steps.
+   * This ensures every plan step with an expected result produces Then assertions.
+   */
+  private static _mapExpectedToAssertions(
+    expected: string,
+    pageName: string,
+    elementRefs: Map<string, string>
+  ): string[] {
+    const results: string[] = [];
+    const expectedLower = expected.toLowerCase();
+
+    // ─── URL assertion ──────────────────────────────────────────────────
+    const urlMatch = expected.match(/url\s+(?:should\s+)?contain[s]?\s+['"""']([^'"""']+)['"""']/i)
+      || expected.match(/(?:redirect|navigate).*?['"""']([^'"""']+)['"""']/i);
+    if (urlMatch) {
+      results.push(`Then the url should contain '${urlMatch[1]}'`);
+    }
+
+    // ─── Text/heading assertion ─────────────────────────────────────────
+    const textMatches = expected.match(/['"""']([^'"""']+)['"""']/g);
+    if (textMatches && (expectedLower.includes('heading') || expectedLower.includes('message') || expectedLower.includes('display') || expectedLower.includes('show') || expectedLower.includes('visible') || expectedLower.includes('text'))) {
+      // Extract the first quoted value as the expected text
+      const firstQuoted = textMatches[0].replace(/['"""']/g, '');
+      const ref = this._findByKeyword(elementRefs, firstQuoted.replace(/\s+/g, '').substring(0, 15));
+      if (ref) {
+        results.push(`Then '${ref}' should be visible`);
+      } else {
+        results.push(`Then '${pageName}.${this._capitalize(firstQuoted.replace(/\s+/g, '').substring(0, 20))}' should be visible`);
+      }
+    }
+
+    // ─── Generic visible assertion (if no specific match above) ─────────
+    if (results.length === 0 && (expectedLower.includes('visible') || expectedLower.includes('displayed') || expectedLower.includes('shown'))) {
+      const target = expected.replace(/\b(should|be|is|are|visible|displayed|shown|the|a|an|with)\b/gi, '').trim().split(/\s+/).slice(0, 3).join('');
+      if (target.length > 3) {
+        const ref = this._findByKeyword(elementRefs, target);
+        if (ref) results.push(`Then '${ref}' should be visible`);
+        else results.push(`Then '${pageName}.${this._capitalize(target)}' should be visible`);
+      }
+    }
+
+    // ─── Color assertion ────────────────────────────────────────────────
+    const colorMatch = expectedLower.match(/(red|green|blue|orange)\s+(?:color|text)/);
+    if (colorMatch) {
+      results.push(`# VERIFY: ${expected} (color assertion — add element ref)`);
+    }
+
+    // If nothing matched, add as comment for manual review
+    if (results.length === 0 && expected.length > 10) {
+      results.push(`# EXPECTED: ${expected}`);
+    }
+
     return results;
   }
 

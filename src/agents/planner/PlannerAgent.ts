@@ -227,12 +227,48 @@ async function run(): Promise<void> {
       aiResponse = await LLMClient.askWithSystem(PlanPrompts.SYSTEM_PROMPT, prompt, fallback);
 
     } else if (storyInput) {
-      // Story mode — AI generates test cases
-      prompt = PlanPrompts.buildStoryPrompt(storyInput, page, pageSnapshot, frameworkContext);
-      fallback = PlanPrompts.buildStoryFallback(page, pageSnapshot, storyInput.mainContent);
+      // Story mode — try deterministic AC extraction FIRST, only use AI if no ACs found
+      const parsedACs = PlanPrompts._parseAcceptanceCriteria(storyInput.mainContent);
 
-      console.log(`[PlannerAgent] Sending to ${config.aiEnabled ? config.aiProvider : 'fallback'}...`);
-      aiResponse = await LLMClient.askWithSystem(PlanPrompts.SYSTEM_PROMPT, prompt, fallback);
+      if (parsedACs.length > 0) {
+        // ── STORY MODE with explicit ACs: Use them directly (no AI hallucination) ──
+        console.log(`[PlannerAgent] Found ${parsedACs.length} acceptance criteria — using directly (no AI modification)`);
+
+        const directOutput = JSON.stringify({
+          page,
+          url: pageSnapshot?.url || '',
+          mode: 'story',
+          aiGenerated: false,
+          elements: pageSnapshot?.elements || [],
+          testCases: parsedACs.map((ac, index) => ({
+            id: `TC-${String(index + 1).padStart(3, '0')}`,
+            title: ac.title,
+            type: index === 0 ? 'happy_path' : (
+              ac.title.toLowerCase().match(/negative|invalid|incorrect|without|unauthorized|empty/)
+                ? 'negative' : 'happy_path'
+            ),
+            navigation: '',
+            steps: ac.steps.map((step, si) => ({
+              stepNo: si + 1,
+              action: step.action,
+              navigation: '',
+              testData: step.testData,
+              expected: step.expected,
+            })),
+            edgeCases: [],
+          })),
+        }, null, 2);
+
+        aiResponse = directOutput;
+      } else {
+        // No parseable ACs — fall back to AI generation
+        console.log(`[PlannerAgent] No explicit ACs found — using AI to generate test cases`);
+        prompt = PlanPrompts.buildStoryPrompt(storyInput, page, pageSnapshot, frameworkContext);
+        fallback = PlanPrompts.buildStoryFallback(page, pageSnapshot, storyInput.mainContent);
+
+        console.log(`[PlannerAgent] Sending to ${config.aiEnabled ? config.aiProvider : 'fallback'}...`);
+        aiResponse = await LLMClient.askWithSystem(PlanPrompts.SYSTEM_PROMPT, prompt, fallback);
+      }
 
     } else {
       // URL only — story mode with no input file

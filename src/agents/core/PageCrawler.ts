@@ -276,6 +276,9 @@ export class PageCrawler {
           const style = window.getComputedStyle(htmlEl);
           if (style.display === 'none' || style.visibility === 'hidden') return;
 
+          // Skip readonly inputs (decorative/overlay — not interactive)
+          if ((htmlEl as HTMLInputElement).readOnly && el.tagName.toLowerCase() === 'input') return;
+
           // Build the best locator (priority: data-testid > id > role+name > placeholder > css > text)
           let locator = '';
           let locatorType = '';

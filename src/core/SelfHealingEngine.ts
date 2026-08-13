@@ -409,7 +409,7 @@ export class SelfHealingEngine {
           const placeholder = element.getAttribute('placeholder');
           if (placeholder) {
             paths.add(
-              `//${element.tagName.toLowerCase()}[@placeholder='${placeholder}']`
+              `//${element.tagName.toLowerCase()}[@placeholder='${placeholder}' and not(@readonly)]`
             );
           }
 
@@ -535,7 +535,9 @@ export class SelfHealingEngine {
       return this.page.locator(`[data-cy="${rawLocator.replace('data-cy=', '')}"]`);
     }
 
-    return this.page.locator(rawLocator);
+    // Generic CSS/XPath-like selector — use .first() to avoid strict mode violations
+    // when multiple elements match (e.g. input + readonly duplicate)
+    return this.page.locator(rawLocator).first();
   }
 
   async _extractFocusedDOM(_resolvedLocator: string): Promise<string> {
@@ -691,11 +693,12 @@ export class SelfHealingEngine {
     const placeholderMatches = focusedDOM.matchAll(/placeholder="([^"]+)"/g);
     for (const match of placeholderMatches) {
       const placeholder = match[1];
+      // Use CSS selector with :not([readonly]) to avoid matching decorative readonly duplicates
       candidates.push({
         type: 'placeholder',
-        locator: `page.getByPlaceholder('${placeholder}')`,
-        rawSelector: `placeholder=${placeholder}`,
-        confidence: 75,
+        locator: `page.locator('input[placeholder="${placeholder}"]:not([readonly])')`,
+        rawSelector: `input[placeholder="${placeholder}"]:not([readonly])`,
+        confidence: 78,
       });
     }
 

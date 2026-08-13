@@ -194,10 +194,21 @@ async function run(): Promise<void> {
   console.log(`[GeneratorAgent] Registry: ${registry.size} elements across ${registry.getPageNames().length} pages`);
 
   // ── Step 3: Crawl live pages (if URLs provided) ────────────────────────────
+  // SKIP crawling entirely for API stories — no browser needed
+  const isApiStory = plan.mode === 'api' ||
+    (plan as any).type === 'API' ||
+    plan.testCases.some((tc) => tc.steps.some((s) =>
+      s.action.toLowerCase().includes('send a') && (s.action.toLowerCase().includes('request') || s.action.toLowerCase().includes('get') || s.action.toLowerCase().includes('post'))
+    ));
+
+  if (isApiStory) {
+    console.log(`[GeneratorAgent] API story detected — skipping browser crawl (no UI elements needed)`);
+  }
+
   const crawledSnapshots: Map<string, PageSnapshot> = new Map();
   let crawler: PageCrawler | null = null;
 
-  const urlsToCrawl = _resolveUrlsToCrawl(args, plan);
+  const urlsToCrawl = isApiStory ? [] : _resolveUrlsToCrawl(args, plan);
 
   if (urlsToCrawl.length > 0) {
     try {
@@ -418,10 +429,20 @@ async function run(): Promise<void> {
     const moduleName = plan.page.toLowerCase();
     const featureLines: string[] = [];
 
-    featureLines.push(`@web @${moduleName}_web`);
-    featureLines.push(`Feature: ${plan.page} - ${plan.sourceFile?.replace(/\.[^.]+$/, '') || 'Generated Feature'}`);
-    featureLines.push(`  As a user`);
-    featureLines.push(`  I want to interact with the ${plan.page} page`);
+    if (isApiStory) {
+      featureLines.push(`@api @${moduleName}`);
+      featureLines.push(`Feature: ${plan.page} - ${plan.sourceFile?.replace(/\.[^.]+$/, '') || 'API Tests'}`);
+      featureLines.push(`  As a developer`);
+      featureLines.push(`  I want to validate API endpoints`);
+      featureLines.push('');
+      featureLines.push(`  Background:`);
+      featureLines.push(`    Given I set the base url to '${plan.url || '{api.baseUrl}'}'`);
+    } else {
+      featureLines.push(`@web @${moduleName}_web`);
+      featureLines.push(`Feature: ${plan.page} - ${plan.sourceFile?.replace(/\.[^.]+$/, '') || 'Generated Feature'}`);
+      featureLines.push(`  As a user`);
+      featureLines.push(`  I want to interact with the ${plan.page} page`);
+    }
     featureLines.push('');
 
     // Build available elements list for AI context
@@ -431,7 +452,9 @@ async function run(): Promise<void> {
       const tags = tc.type === 'negative' ? '@negative @regression' : '@smoke @e2e';
       featureLines.push(`  ${tags}`);
       featureLines.push(`  Scenario: ${tc.id} ${tc.title}`);
-      featureLines.push(`    Given I navigate to the application`);
+      if (!isApiStory) {
+        featureLines.push(`    Given I navigate to the application`);
+      }
 
       // Filter elements relevant to THIS AC's keywords (max 40)
       const acKeywords = tc.steps
@@ -454,7 +477,9 @@ async function run(): Promise<void> {
         : allElements.slice(0, 30).map((ref) => `  '${ref}'`);
 
       // Per-AC AI call
-      const acPrompt = GeneratePrompts.buildPerACPrompt(tc, plan.page, availableElements);
+      const acPrompt = isApiStory
+        ? GeneratePrompts.buildPerACPromptAPI(tc, plan.url || '')
+        : GeneratePrompts.buildPerACPrompt(tc, plan.page, availableElements);
       const deterministicFallback = tc.steps.map((s) => {
         const mapped = GeneratePrompts['_mapStepToGherkin'](s, plan.page, elementRefs);
         return mapped.filter((l: string) => !l.startsWith('#')).map((l: string) => `    ${l}`).join('\n');

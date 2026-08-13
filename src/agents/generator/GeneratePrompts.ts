@@ -273,6 +273,53 @@ ${availableElements.join('\n')}
 - Include assertion steps (Then) for each expected result`;
   }
 
+  /**
+   * Builds a focused per-AC prompt for API test generation.
+   * No element refs needed — uses API step patterns directly.
+   */
+  static buildPerACPromptAPI(tc: PlanTestCase, baseUrl: string): string {
+    return `Convert this API test case into Gherkin steps.
+
+## Test Case
+Title: ${tc.title}
+Steps:
+${tc.steps.map((s) => `- Action: ${s.action}${s.testData ? ` | Data: ${s.testData}` : ''}${s.expected ? ` | Expected: ${s.expected}` : ''}`).join('\n')}
+
+## API Step Patterns (use ONLY these)
+- Given I set the base url to '${baseUrl}'
+- Given I set bearer token '{tokenVariable}'
+- When I send a GET request to '/endpoint'
+- When I send a POST request to '/endpoint' with body:
+  | key | value |
+- When I send a PUT request to '/endpoint' with body:
+  | key | value |
+- When I send a PATCH request to '/endpoint' with body:
+  | key | value |
+- When I send a DELETE request to '/endpoint'
+- Then the response status should be <code>
+- Then the response status should be in range <min> to <max>
+- Then the response body field '<path>' should equal '<value>'
+- Then the response body field '<path>' should exist
+- Then the response body field '<path>' should be a non-empty array
+- And I store the response body field '<path>' as '<varName>'
+
+## Nested JSON Path Examples
+- 'user.name' — top-level field
+- 'address.city' — nested object
+- 'address.geo.lat' — deeply nested
+- '0.id' — array index access
+- 'posts.0.title' — array within object
+
+## Rules
+- Output ONLY Gherkin steps (no Feature/Scenario headers, no comments, no explanation)
+- One step per line, starting with When/Then/And/Given
+- Do NOT include 'Given I set the base url' — it's in the Background
+- For POST/PUT/PATCH with body, use DataTable format (| key | value |)
+- For assertions, use exact field paths from the test case
+- Store response fields that are needed by later steps using 'I store the response body field'
+- Include ALL assertion steps mentioned in expected results`;
+  }
+
   // ─── Deterministic Step Mapper ────────────────────────────────────────────
 
   /**

@@ -375,17 +375,23 @@ export class PageCrawler {
                 label = `Button${visibleText}`;
               }
             }
-            // For inputs: prefer placeholder or name
-            if (elementType === 'input' && !label && name) {
-              label = name;
+            // For inputs: prefer name > placeholder > title (shorter = better key)
+            if (elementType === 'input' || elementType === 'textarea') {
+              if (name && name.length > 1 && name.length < 20) {
+                label = name;
+              } else if (placeholder && placeholder.length < 40) {
+                // Truncate long placeholders to first 3 words
+                label = placeholder.split(/[\s,]+/).slice(0, 3).join(' ');
+              } else if (title) {
+                label = title.split(/[\s,]+/).slice(0, 3).join(' ');
+              } else if (!label) {
+                label = name || placeholder || title || '';
+              }
             }
             // Last resort: use id
             if (!label && id) label = id;
-            // Final fallback: use class-based description with element type
-            if (!label) {
-              const classes = Array.from(htmlEl.classList).slice(0, 2).join(' ');
-              if (classes) label = `${el.tagName.toLowerCase()} ${classes}`.substring(0, 30);
-            }
+            // Final fallback: skip elements with only CSS class identifiers (not test-worthy)
+            if (!label) return;
 
             // Skip elements with truly no usable label at all
             if (!label || label.length < 2) return;

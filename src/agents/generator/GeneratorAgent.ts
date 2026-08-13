@@ -577,6 +577,26 @@ function _injectFromRegistry(
   registry: PropertiesRegistry,
   elementRefs: Map<string, string>
 ): void {
+  // Skip registry injection if the plan targets a DIFFERENT application domain
+  // This prevents cross-app contamination (e.g., Sauce Demo locators injected into Flipkart tests)
+  const planUrl = plan.url || '';
+  const config = AgentsConfig.getInstance();
+  const frameworkUrl = config.appUrl || '';
+
+  if (planUrl && frameworkUrl) {
+    try {
+      const planDomain = new URL(planUrl).hostname;
+      const frameworkDomain = new URL(frameworkUrl).hostname;
+      if (planDomain !== frameworkDomain) {
+        console.log(`[GeneratorAgent] Skipping registry injection — plan targets ${planDomain} (framework is ${frameworkDomain})`);
+        // Only inject elements from the plan's own page (already crawled)
+        const directElements = registry.getPageElements(plan.page);
+        directElements.forEach((el) => elementRefs.set(el.ref, el.ref));
+        return;
+      }
+    } catch { /* URL parsing failed, continue with injection */ }
+  }
+
   const allPageNames = registry.getPageNames();
   const planPageLower = plan.page.toLowerCase();
 

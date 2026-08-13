@@ -249,14 +249,21 @@ export class PageCrawler {
         'input',
         'select',
         'textarea',
-        'a[href]',
+        'nav a[href]',
+        'header a[href]',
         '[role="button"]',
-        '[role="link"]',
         '[role="combobox"]',
         '[role="textbox"]',
         '[role="checkbox"]',
         '[role="radio"]',
+        '[role="search"] a',
+        '[data-testid]',
+        '[data-qa]',
+        '[data-cy]',
       ];
+
+      // Also capture top-level nav links (limit to first 20 to avoid category spam)
+      const MAX_LINKS = 20;
 
       const seen = new Set<string>();
 
@@ -367,7 +374,11 @@ export class PageCrawler {
         });
       });
 
-      return results;
+      // Limit: keep all inputs/buttons/selects, but cap links at MAX_LINKS
+      const inputs = results.filter((r: any) => r.type === 'input' || r.type === 'select' || r.type === 'textarea' || r.type === 'button');
+      const links = results.filter((r: any) => r.type === 'link').slice(0, MAX_LINKS);
+      const others = results.filter((r: any) => r.type === 'other');
+      return [...inputs, ...links, ...others];
     });
 
     return elements as DiscoveredElement[];

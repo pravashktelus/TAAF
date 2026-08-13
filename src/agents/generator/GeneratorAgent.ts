@@ -391,13 +391,33 @@ async function run(): Promise<void> {
     featureLines.push('');
 
     // Build available elements list for AI context
-    const availableElements = [...elementRefs.values()].map((ref) => `  '${ref}'`);
+    const allElements = [...elementRefs.values()];
 
     for (const tc of plan.testCases) {
       const tags = tc.type === 'negative' ? '@negative @regression' : '@smoke @e2e';
       featureLines.push(`  ${tags}`);
       featureLines.push(`  Scenario: ${tc.id} ${tc.title}`);
       featureLines.push(`    Given I navigate to the application`);
+
+      // Filter elements relevant to THIS AC's keywords (max 40)
+      const acKeywords = tc.steps
+        .map((s) => `${s.action} ${s.expected}`.toLowerCase())
+        .join(' ')
+        .split(/[\s'".,;:!?]+/)
+        .filter((w) => w.length > 3);
+      
+      const relevantElements = allElements.filter((ref) => {
+        const refLower = ref.toLowerCase();
+        // Always include inputs, buttons, and selects
+        if (refLower.includes('input') || refLower.includes('btn') || refLower.includes('select')) return true;
+        // Include if any AC keyword matches
+        return acKeywords.some((kw) => refLower.includes(kw));
+      }).slice(0, 40);
+
+      // If too few matched, include the first 30 elements as general context
+      const availableElements = relevantElements.length >= 5 
+        ? relevantElements.map((ref) => `  '${ref}'`)
+        : allElements.slice(0, 30).map((ref) => `  '${ref}'`);
 
       // Per-AC AI call
       const acPrompt = GeneratePrompts.buildPerACPrompt(tc, plan.page, availableElements);

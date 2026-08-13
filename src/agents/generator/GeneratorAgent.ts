@@ -560,7 +560,7 @@ async function run(): Promise<void> {
     .replace(new RegExp(`^${plan.page}-plan_from_`, 'i'), '')
     .replace(/^[^_]+-plan_from_/, '')
     || plan.page;
-  const featurePath = featureWriter.write(featureContent, plan.page, sourceSuffix, args.apply);
+  const featurePath = featureWriter.write(featureContent, plan.page, sourceSuffix, args.apply, isApiStory);
 
   // ── Done ──────────────────────────────────────────────────────────────────
   console.log('\n═══════════════════════════════════════════');

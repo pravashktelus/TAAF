@@ -235,206 +235,267 @@ export class PageCrawler {
     return { url, title, elements, navigationLinks, forms, rawHTML };
   }
 
-  // ─── Private: Element Extraction ──────────────────────────────────────────
+  // ─── Private: Element Extraction (Accessibility Snapshot + DOM Attributes) ──
 
   private async _extractElements(): Promise<DiscoveredElement[]> {
     if (!this.page) return [];
 
-    // Extract all interactive elements from the DOM
-    const elements = await this.page.evaluate(() => {
-      const results: any[] = [];
+    const results: DiscoveredElement[] = [];
+    const seenKeys = new Set<string>();
+    const MAX_LINKS = 20;
+    let linkCount = 0;
 
-      const interactiveSelectors = [
-        'button',
-        'input',
-        'select',
-        'textarea',
-        'nav a[href]',
-        'header a[href]',
-        '[role="button"]',
-        '[role="combobox"]',
-        '[role="textbox"]',
-        '[role="checkbox"]',
-        '[role="radio"]',
-        '[role="search"] a',
-        '[data-testid]',
-        '[data-qa]',
-        '[data-cy]',
-      ];
-
-      // Also capture top-level nav links (limit to first 20 to avoid category spam)
-      const MAX_LINKS = 20;
-
-      const seen = new Set<string>();
-
-      interactiveSelectors.forEach((selector) => {
-        const nodes = document.querySelectorAll(selector);
-        nodes.forEach((el: Element) => {
-          const htmlEl = el as HTMLElement;
-
-          // Skip hidden elements
-          const style = window.getComputedStyle(htmlEl);
-          if (style.display === 'none' || style.visibility === 'hidden') return;
-
-          // Skip readonly inputs (decorative/overlay — not interactive)
-          if ((htmlEl as HTMLInputElement).readOnly && el.tagName.toLowerCase() === 'input') return;
-
-          // Build the best locator (priority: data-testid > id > role+name > placeholder > css > text)
-          let locator = '';
-          let locatorType = '';
-
-          const testId = htmlEl.getAttribute('data-testid');
-          const dataQa = htmlEl.getAttribute('data-qa');
-          const dataCy = htmlEl.getAttribute('data-cy');
-          const id = htmlEl.getAttribute('id');
-          const placeholder = htmlEl.getAttribute('placeholder');
-          const ariaLabel = htmlEl.getAttribute('aria-label');
-          const role = htmlEl.getAttribute('role') || el.tagName.toLowerCase();
-          const visibleText = htmlEl.textContent?.trim().substring(0, 50) || '';
-          const type = (htmlEl as HTMLInputElement).type || '';
-
-          if (testId) {
-            locator = `//${el.tagName.toLowerCase()}[@data-testid='${testId}']`;
-            locatorType = 'data-testid';
-          } else if (dataQa) {
-            locator = `//${el.tagName.toLowerCase()}[@data-qa='${dataQa}']`;
-            locatorType = 'data-qa';
-          } else if (dataCy) {
-            locator = `//${el.tagName.toLowerCase()}[@data-cy='${dataCy}']`;
-            locatorType = 'data-cy';
-          } else if (id) {
-            locator = `#${id}`;
-            locatorType = 'id';
-          } else if (placeholder) {
-            locator = `placeholder=${placeholder}`;
-            locatorType = 'placeholder';
-          } else if (ariaLabel) {
-            locator = `role=${role}[name='${ariaLabel}']`;
-            locatorType = 'aria';
-          } else if (visibleText && el.tagName.toLowerCase() === 'button') {
-            locator = `text=${visibleText}`;
-            locatorType = 'text';
-          } else if (visibleText && el.tagName.toLowerCase() === 'a') {
-            locator = `text=${visibleText}`;
-            locatorType = 'text';
-          } else {
-            // fallback: basic CSS
-            const classes = Array.from(htmlEl.classList).slice(0, 2).join('.');
-            locator = classes ? `.${classes}` : el.tagName.toLowerCase();
-            locatorType = 'css';
+    try {
+      // Use Playwright's locator-based approach to get accessibility info
+      // page.accessibility.snapshot() is deprecated — use evaluate with getComputedAccessibleName
+      const snapshot = await this.page.evaluate(() => {
+        const tree: any = { role: 'WebArea', name: document.title, children: [] };
+        
+        function processElement(el: Element, parent: any) {
+          const role = el.getAttribute('role') || getImplicitRole(el);
+          if (!role) return;
+          
+          const name = el.getAttribute('aria-label') 
+            || el.getAttribute('title')
+            || (el as HTMLInputElement).placeholder
+            || el.textContent?.trim().substring(0, 50) || '';
+          
+          const node: any = { role, name, children: [] };
+          parent.children.push(node);
+          
+          for (const child of Array.from(el.children)) {
+            processElement(child, node);
           }
-
-          // Deduplicate by locator
-          if (seen.has(locator)) return;
-          seen.add(locator);
-
-          // Determine element type
-          let elementType = 'other';
+        }
+        
+        function getImplicitRole(el: Element): string | null {
           const tag = el.tagName.toLowerCase();
-          if (tag === 'button' || role === 'button') elementType = 'button';
-          else if (tag === 'input' && type !== 'hidden') elementType = 'input';
-          else if (tag === 'select' || role === 'combobox') elementType = 'select';
-          else if (tag === 'textarea') elementType = 'textarea';
-          else if (tag === 'a') elementType = 'link';
-
-          // Suggest a PascalCase key — prefer data-testid/data-qa for uniqueness
-          const keySource = testId || dataQa || dataCy || '';
-          let label = '';
-          let key = '';
-
-          if (keySource) {
-            // Use data attribute for key: "login-email" → "LoginEmail"
-            label = keySource;
-            const keyWords = keySource.split(/[-_\s]+/).map((w: string) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase());
-            let prefix = '';
-            if (elementType === 'button') prefix = 'Btn';
-            else if (elementType === 'input') prefix = 'Input';
-            else if (elementType === 'select') prefix = 'Select';
-            else if (elementType === 'textarea') prefix = 'Input';
-            else if (elementType === 'link') prefix = 'Nav';
-            key = prefix + keyWords.join('');
-          } else {
-            // Fallback: try multiple attributes for a meaningful label
-            const title = htmlEl.getAttribute('title') || '';
-            const name = htmlEl.getAttribute('name') || '';
-            const value = (htmlEl as HTMLInputElement).value || '';
-            label = ariaLabel || placeholder || title || name || '';
-            
-            // For buttons: prefer visible text over other attributes
-            if (elementType === 'button' && visibleText && visibleText.length > 1 && visibleText.length < 30) {
-              label = visibleText;
-            }
-            // For buttons with very short text (✕, X, ×, >, <) — these are close/dismiss/arrow buttons
-            if (elementType === 'button' && visibleText && visibleText.length <= 2) {
-              // Try to get context from parent or nearby elements
-              const parentText = htmlEl.parentElement?.getAttribute('aria-label')
-                || htmlEl.closest('[class*="modal"], [class*="popup"], [class*="dialog"], [role="dialog"]')?.getAttribute('aria-label')
-                || '';
-              if (parentText) {
-                label = `Close ${parentText}`;
-              } else if (visibleText === '✕' || visibleText === '×' || visibleText === 'X' || visibleText === 'x') {
-                label = 'ClosePopup';
-              } else {
-                label = `Button${visibleText}`;
-              }
-            }
-            // For inputs: prefer name > placeholder > title (shorter = better key)
-            if (elementType === 'input' || elementType === 'textarea') {
-              if (name && name.length > 1 && name.length < 20) {
-                label = name;
-              } else if (placeholder && placeholder.length < 40) {
-                // Truncate long placeholders to first 3 words
-                label = placeholder.split(/[\s,]+/).slice(0, 3).join(' ');
-              } else if (title) {
-                label = title.split(/[\s,]+/).slice(0, 3).join(' ');
-              } else if (!label) {
-                label = name || placeholder || title || '';
-              }
-            }
-            // Last resort: use id
-            if (!label && id) label = id;
-            // Final fallback: skip elements with only CSS class identifiers (not test-worthy)
-            if (!label) return;
-
-            // Skip elements with truly no usable label at all
-            if (!label || label.length < 2) return;
-
-            const sanitized = label.replace(/[^a-zA-Z0-9\s]/g, '').trim();
-            if (!sanitized || sanitized.length < 2) return;
-
-            const words = sanitized.split(/\s+/).map((w: string) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase());
-            let prefix = '';
-            if (elementType === 'button') prefix = 'Btn';
-            else if (elementType === 'input') prefix = 'Input';
-            else if (elementType === 'select') prefix = 'Select';
-            else if (elementType === 'textarea') prefix = 'Input';
-            else if (elementType === 'link') prefix = 'Nav';
-            key = prefix + words.slice(0, 4).join('');
-          }
-
-          // Skip elements with generic/empty keys (just the prefix with no identifier)
-          if (key === 'Btn' || key === 'Input' || key === 'Nav' || key === 'Select' || key.length <= 3) return;
-
-          // Skip duplicate keys — first one wins (use locator-based seen set + key check)
-          const keyForDedup = `KEY:${key}`;
-          if (seen.has(keyForDedup)) return;
-          seen.add(keyForDedup);
-
-          results.push({
-            key,
-            locator,
-            type: elementType,
-            label,
-            tag,
-          });
-        });
+          const type = (el as HTMLInputElement).type;
+          if (tag === 'button' || el.getAttribute('role') === 'button') return 'button';
+          if (tag === 'input' && type !== 'hidden') return 'textbox';
+          if (tag === 'textarea') return 'textbox';
+          if (tag === 'select') return 'combobox';
+          if (tag === 'a' && el.getAttribute('href')) return 'link';
+          if (tag === 'input' && type === 'checkbox') return 'checkbox';
+          if (tag === 'input' && type === 'radio') return 'radio';
+          if (el.getAttribute('role')) return el.getAttribute('role');
+          return null;
+        }
+        
+        for (const child of Array.from(document.body.children)) {
+          processElement(child, tree);
+        }
+        return tree;
       });
 
-      // Limit: keep all inputs/buttons/selects, but cap links at MAX_LINKS
-      const inputs = results.filter((r: any) => r.type === 'input' || r.type === 'select' || r.type === 'textarea' || r.type === 'button');
-      const links = results.filter((r: any) => r.type === 'link').slice(0, MAX_LINKS);
-      const others = results.filter((r: any) => r.type === 'other');
-      return [...inputs, ...links, ...others];
+      if (!snapshot || !snapshot.children) return this._extractElementsFallback();
+
+      // Flatten the accessibility tree and extract interactive elements
+      const flatNodes = this._flattenAccessibilityTree(snapshot);
+
+      // Also get data-testid/data-qa elements via DOM (accessibility tree doesn't expose these)
+      const dataAttributes = await this.page.evaluate(() => {
+        const attrs: { selector: string; testId?: string; dataQa?: string; dataCy?: string; tag: string; name?: string; placeholder?: string }[] = [];
+        document.querySelectorAll('[data-testid], [data-qa], [data-cy]').forEach((el) => {
+          const htmlEl = el as HTMLElement;
+          if (htmlEl.offsetParent === null) return; // hidden
+          attrs.push({
+            selector: el.tagName.toLowerCase(),
+            testId: el.getAttribute('data-testid') || undefined,
+            dataQa: el.getAttribute('data-qa') || undefined,
+            dataCy: el.getAttribute('data-cy') || undefined,
+            tag: el.tagName.toLowerCase(),
+            name: el.getAttribute('name') || undefined,
+            placeholder: el.getAttribute('placeholder') || undefined,
+          });
+        });
+        return attrs;
+      });
+
+      // Process accessibility nodes
+      for (const node of flatNodes) {
+        const role = node.role;
+        const name = node.name || '';
+
+        // Skip non-interactive roles
+        if (!['button', 'textbox', 'combobox', 'checkbox', 'radio', 'link', 'searchbox', 'spinbutton', 'slider', 'menuitem'].includes(role)) continue;
+
+        // Skip links beyond limit
+        if (role === 'link') {
+          if (linkCount >= MAX_LINKS) continue;
+          linkCount++;
+        }
+
+        // Determine element type
+        let elementType = 'other';
+        if (role === 'button') elementType = 'button';
+        else if (role === 'textbox' || role === 'searchbox' || role === 'spinbutton') elementType = 'input';
+        else if (role === 'combobox') elementType = 'select';
+        else if (role === 'link' || role === 'menuitem') elementType = 'link';
+        else if (role === 'checkbox' || role === 'radio') elementType = 'input';
+
+        // Build locator — prefer role + name (what Playwright actually uses)
+        let locator = '';
+        if (name && name.length > 1) {
+          locator = `role=${role}[name='${name.replace(/'/g, "\\'")}']`;
+        } else {
+          continue; // Skip elements without a name — not reliably locatable
+        }
+
+        // Generate key
+        let prefix = '';
+        if (elementType === 'button') prefix = 'Btn';
+        else if (elementType === 'input') prefix = 'Input';
+        else if (elementType === 'select') prefix = 'Select';
+        else if (elementType === 'link') prefix = 'Nav';
+
+        const sanitized = name.replace(/[^a-zA-Z0-9\s]/g, '').trim();
+        if (!sanitized || sanitized.length < 2) continue;
+        const words = sanitized.split(/\s+/).slice(0, 4).map((w: string) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase());
+        const key = prefix + words.join('');
+
+        if (key.length <= 3 || seenKeys.has(key)) continue;
+        seenKeys.add(key);
+
+        results.push({
+          key,
+          locator,
+          type: elementType,
+          label: name,
+          tag: role,
+        });
+      }
+
+      // Merge data-attribute elements (higher priority locators)
+      for (const attr of dataAttributes) {
+        const testAttr = attr.testId || attr.dataQa || attr.dataCy || '';
+        if (!testAttr) continue;
+
+        const attrType = attr.testId ? 'data-testid' : attr.dataQa ? 'data-qa' : 'data-cy';
+        const locator = `//${attr.tag}[@${attrType}='${testAttr}']`;
+
+        // Determine type from tag
+        let elementType = 'other';
+        if (attr.tag === 'button') elementType = 'button';
+        else if (attr.tag === 'input' || attr.tag === 'textarea') elementType = 'input';
+        else if (attr.tag === 'select') elementType = 'select';
+        else if (attr.tag === 'a') elementType = 'link';
+
+        let prefix = '';
+        if (elementType === 'button') prefix = 'Btn';
+        else if (elementType === 'input') prefix = 'Input';
+        else if (elementType === 'select') prefix = 'Select';
+        else if (elementType === 'link') prefix = 'Nav';
+
+        const keyWords = testAttr.split(/[-_\s]+/).map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase());
+        const key = prefix + keyWords.join('');
+
+        if (key.length <= 3 || seenKeys.has(key)) continue;
+        seenKeys.add(key);
+
+        results.push({
+          key,
+          locator,
+          type: elementType,
+          label: testAttr,
+          tag: attr.tag,
+        });
+      }
+
+      console.log(`[PageCrawler] Accessibility snapshot: ${flatNodes.length} nodes → ${results.length} interactive elements`);
+
+      // If accessibility approach found too few elements, supplement with DOM fallback
+      if (results.length < 3) {
+        console.log(`[PageCrawler] Few elements from accessibility tree — supplementing with DOM fallback`);
+        const fallbackElements = await this._extractElementsFallback();
+        for (const el of fallbackElements) {
+          if (!seenKeys.has(el.key)) {
+            seenKeys.add(el.key);
+            results.push(el);
+          }
+        }
+      }
+
+      return results;
+
+    } catch (error) {
+      console.warn(`[PageCrawler] Accessibility snapshot failed: ${error}. Falling back to DOM evaluation.`);
+      return this._extractElementsFallback();
+    }
+  }
+
+  /**
+   * Flattens the accessibility tree into a flat array of nodes.
+   */
+  private _flattenAccessibilityTree(node: any): any[] {
+    const results: any[] = [node];
+    if (node.children) {
+      for (const child of node.children) {
+        results.push(...this._flattenAccessibilityTree(child));
+      }
+    }
+    return results;
+  }
+
+  /**
+   * Fallback DOM-based extraction (used when accessibility snapshot fails).
+   */
+  private async _extractElementsFallback(): Promise<DiscoveredElement[]> {
+    if (!this.page) return [];
+    console.log('[PageCrawler] Using DOM fallback extraction...');
+
+    const elements = await this.page.evaluate(() => {
+      const results: any[] = [];
+      const seen = new Set<string>();
+
+      document.querySelectorAll('button, input, select, textarea, [role="button"], [data-testid], [data-qa], [data-cy]').forEach((el) => {
+        const htmlEl = el as HTMLElement;
+        if (htmlEl.offsetParent === null) return;
+        if ((htmlEl as HTMLInputElement).readOnly) return;
+
+        const testId = el.getAttribute('data-testid');
+        const dataQa = el.getAttribute('data-qa');
+        const dataCy = el.getAttribute('data-cy');
+        const placeholder = el.getAttribute('placeholder') || '';
+        const name = el.getAttribute('name') || '';
+        const ariaLabel = el.getAttribute('aria-label') || '';
+        const visibleText = (htmlEl.textContent || '').trim().substring(0, 30);
+        const tag = el.tagName.toLowerCase();
+
+        const keySource = testId || dataQa || dataCy || ariaLabel || placeholder || name || visibleText;
+        if (!keySource || keySource.length < 2) return;
+
+        let locator = '';
+        if (testId) locator = `//${tag}[@data-testid='${testId}']`;
+        else if (dataQa) locator = `//${tag}[@data-qa='${dataQa}']`;
+        else if (dataCy) locator = `//${tag}[@data-cy='${dataCy}']`;
+        else if (placeholder) locator = `placeholder=${placeholder}`;
+        else if (ariaLabel) locator = `role=${tag === 'button' ? 'button' : 'textbox'}[name='${ariaLabel}']`;
+        else locator = `text=${visibleText}`;
+
+        if (seen.has(locator)) return;
+        seen.add(locator);
+
+        let elementType = 'other';
+        if (tag === 'button' || el.getAttribute('role') === 'button') elementType = 'button';
+        else if (tag === 'input' || tag === 'textarea') elementType = 'input';
+        else if (tag === 'select') elementType = 'select';
+
+        let prefix = '';
+        if (elementType === 'button') prefix = 'Btn';
+        else if (elementType === 'input') prefix = 'Input';
+        else if (elementType === 'select') prefix = 'Select';
+
+        const sanitized = keySource.replace(/[^a-zA-Z0-9\s]/g, '').trim();
+        const words = sanitized.split(/[\s-_]+/).slice(0, 4).map((w: string) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase());
+        const key = prefix + words.join('');
+
+        if (key.length <= 3) return;
+
+        results.push({ key, locator, type: elementType, label: keySource, tag });
+      });
+
+      return results;
     });
 
     return elements as DiscoveredElement[];

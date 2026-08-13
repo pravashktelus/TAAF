@@ -1,4 +1,5 @@
 import { TestPlan, PlanTestCase } from '../planner/PlanFormatter';
+import { StepPatternExtractor } from '../core/StepPatternExtractor';
 
 /**
  * GeneratePrompts
@@ -240,6 +241,9 @@ Convert ALL ${plan.testCases.length} test cases above into a single .feature fil
     pageName: string,
     availableElements: string[],
   ): string {
+    // Read actual step patterns from the framework's step definition files
+    const realStepPatterns = StepPatternExtractor.getWebStepPatterns();
+
     return `Convert this test case into Gherkin steps.
 
 ## Test Case
@@ -250,27 +254,22 @@ ${tc.steps.map((s) => `- Action: ${s.action}${s.testData ? ` | Data: ${s.testDat
 ## Available Elements (use ONLY these — do NOT invent new ones)
 ${availableElements.join('\n')}
 
-## Step Patterns (use ONLY these)
-- When I click 'Page.Element'
-- When I enter 'value' into 'Page.Element'
-- When I select 'Option' from dropdown 'Page.Element'
-- Then 'Page.Element' should be visible
-- Then 'Page.Element' should have text 'expected'
-- Then 'Page.Element' should contain text 'partial'
-- Then the url should contain 'fragment'
-- When I get text from 'Page.Element' and store as 'varName'
-- When I wait N seconds
+## Step Patterns from Framework (use ONLY these — they are the actual implemented steps)
+${realStepPatterns}
 
 ## Data Syntax
-- Random data: ##FullName, ##Email, ##Password
+- Random data: ##FullName, ##Email, ##Password, ##MobileNum, ##Address
 - Cross-scenario variables: $$variableName
+- Scenario variables: {variableName}
 
 ## Rules
 - Output ONLY Gherkin steps (no Feature/Scenario headers, no comments, no explanation)
 - One step per line, starting with When/Then/And
-- Use elements from the list above — if unsure which element to use, pick the closest match
+- Use ONLY elements from the "Available Elements" list — do NOT invent page names or element keys
+- Use ONLY step patterns from the "Step Patterns from Framework" list — do NOT invent new step patterns
 - For multi-field forms (name, email, password, review), generate separate enter steps for EACH field
-- Include assertion steps (Then) for each expected result`;
+- Include assertion steps (Then) for each expected result
+- If an element is not in the list, use '${pageName}.ElementKey' format with a descriptive key name`;
   }
 
   /**
@@ -278,6 +277,9 @@ ${availableElements.join('\n')}
    * No element refs needed — uses API step patterns directly.
    */
   static buildPerACPromptAPI(tc: PlanTestCase, baseUrl: string): string {
+    // Read actual API step patterns from the framework's step definition files
+    const realApiPatterns = StepPatternExtractor.getApiStepPatterns();
+
     return `Convert this API test case into Gherkin steps.
 
 ## Test Case
@@ -285,23 +287,8 @@ Title: ${tc.title}
 Steps:
 ${tc.steps.map((s) => `- Action: ${s.action}${s.testData ? ` | Data: ${s.testData}` : ''}${s.expected ? ` | Expected: ${s.expected}` : ''}`).join('\n')}
 
-## API Step Patterns (use ONLY these)
-- Given I set the base url to '${baseUrl}'
-- Given I set bearer token '{tokenVariable}'
-- When I send a GET request to '/endpoint'
-- When I send a POST request to '/endpoint' with body:
-  | key | value |
-- When I send a PUT request to '/endpoint' with body:
-  | key | value |
-- When I send a PATCH request to '/endpoint' with body:
-  | key | value |
-- When I send a DELETE request to '/endpoint'
-- Then the response status should be <code>
-- Then the response status should be in range <min> to <max>
-- Then the response body field '<path>' should equal '<value>'
-- Then the response body field '<path>' should exist
-- Then the response body field '<path>' should be a non-empty array
-- And I store the response body field '<path>' as '<varName>'
+## API Step Patterns from Framework (use ONLY these — they are the actual implemented steps)
+${realApiPatterns}
 
 ## Nested JSON Path Examples
 - 'user.name' — top-level field
@@ -313,11 +300,13 @@ ${tc.steps.map((s) => `- Action: ${s.action}${s.testData ? ` | Data: ${s.testDat
 ## Rules
 - Output ONLY Gherkin steps (no Feature/Scenario headers, no comments, no explanation)
 - One step per line, starting with When/Then/And/Given
-- Do NOT include 'Given I set the base url' — it's in the Background
-- For POST/PUT/PATCH with body, use DataTable format (| key | value |)
+- Do NOT include 'Given I set the base url' — it's already in the Background
+- For POST/PUT/PATCH with body, use DataTable format:
+  | key | value |
 - For assertions, use exact field paths from the test case
-- Store response fields that are needed by later steps using 'I store the response body field'
-- Include ALL assertion steps mentioned in expected results`;
+- Store response fields using 'I store the response body field' when needed by later steps
+- Include ALL assertion steps mentioned in expected results
+- Use ONLY the step patterns listed above — do NOT invent new step patterns`;
   }
 
   // ─── Deterministic Step Mapper ────────────────────────────────────────────

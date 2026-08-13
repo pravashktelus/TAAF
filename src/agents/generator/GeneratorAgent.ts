@@ -188,18 +188,22 @@ async function run(): Promise<void> {
     process.exit(1);
   }
 
-  // ── Step 2: Load properties registry ──────────────────────────────────────
-  const registry = new PropertiesRegistry();
-  registry.load();
-  console.log(`[GeneratorAgent] Registry: ${registry.size} elements across ${registry.getPageNames().length} pages`);
-
-  // ── Step 3: Crawl live pages (if URLs provided) ────────────────────────────
-  // SKIP crawling entirely for API stories — no browser needed
+  // Detect API story early — determines what to skip
   const isApiStory = plan.mode === 'api' ||
     (plan as any).type === 'API' ||
     plan.testCases.some((tc) => tc.steps.some((s) =>
       s.action.toLowerCase().includes('send a') && (s.action.toLowerCase().includes('request') || s.action.toLowerCase().includes('get') || s.action.toLowerCase().includes('post'))
     ));
+
+  // ── Step 2: Load properties registry ──────────────────────────────────────
+  const registry = new PropertiesRegistry();
+  if (!isApiStory) {
+    registry.load();
+    console.log(`[GeneratorAgent] Registry: ${registry.size} elements across ${registry.getPageNames().length} pages`);
+  }
+
+  // ── Step 3: Crawl live pages (if URLs provided) ────────────────────────────
+  // SKIP crawling entirely for API stories — no browser needed
 
   if (isApiStory) {
     console.log(`[GeneratorAgent] API story detected — skipping browser crawl (no UI elements needed)`);
@@ -392,27 +396,35 @@ async function run(): Promise<void> {
 
   // ALWAYS inject from registry — complements crawled elements with existing refs
   // This ensures the deterministic step mapper can find Login, Nav, Dashboard elements
-  _injectFromRegistry(plan, registry, elementRefs);
-  console.log(`[GeneratorAgent] Element map total (crawl + registry): ${elementRefs.size} refs`);
+  if (!isApiStory) {
+    _injectFromRegistry(plan, registry, elementRefs);
+    console.log(`[GeneratorAgent] Element map total (crawl + registry): ${elementRefs.size} refs`);
+  }
 
 
   // ── Step 5: Write properties files ────────────────────────────────────────
   const propertiesWriter = new PropertiesWriter();
   const writtenProps: string[] = [];
 
-  if (newElementsByPage.size > 0) {
-    // Write crawled new elements per page
-    newElementsByPage.forEach((elements, pageName) => {
-      const propsPath = propertiesWriter.write(pageName, elements as any);
-      writtenProps.push(propsPath);
-    });
-  } else if (crawledSnapshots.size === 0) {
-    // No URL — write convention-based placeholder for current page
-    const conventionElements = _buildConventionElements(plan, elementRefs);
-    if (conventionElements.length > 0) {
-      const propsPath = propertiesWriter.write(plan.page, conventionElements as any);
-      writtenProps.push(propsPath);
+  if (!isApiStory) {
+    if (newElementsByPage.size > 0) {
+      // Write crawled new elements per page
+      newElementsByPage.forEach((elements, pageName) => {
+        const propsPath = propertiesWriter.write(pageName, elements as any);
+        writtenProps.push(propsPath);
+      });
+    } else if (crawledSnapshots.size === 0) {
+      // No URL — write convention-based placeholder for current page
+      const conventionElements = _buildConventionElements(plan, elementRefs);
+      if (conventionElements.length > 0) {
+        const propsPath = propertiesWriter.write(plan.page, conventionElements as any);
+        writtenProps.push(propsPath);
+      }
     }
+  } else {
+    console.log(`[GeneratorAgent] API mode: Base URL: ${plan.url || '{api.baseUrl}'}`);
+    console.log(`[GeneratorAgent] API mode: ${plan.testCases.length} endpoint test(s) to generate`);
+    console.log(`[GeneratorAgent] API mode: No .properties file needed`);
   }
 
   // ── Step 6: Generate feature file (per-AC AI calls or deterministic fallback) ─

@@ -467,10 +467,21 @@ async function run(): Promise<void> {
       );
 
       // Parse AI response — each line should be a step
+      // Then fix any refs that AI invented (not in our element list)
+      const validRefs = new Set([...elementRefs.keys(), ...elementRefs.values()]);
       const stepLines = aiSteps
         .split('\n')
         .map((l) => l.trim())
         .filter((l) => l.match(/^(When|Then|And|But|Given)\s/i))
+        .map((l) => {
+          // Replace any 'OtherPage.Element' refs not in our list with 'PlanPage.Element'
+          return l.replace(/'([A-Z][a-zA-Z0-9]+)\.([A-Za-z][A-Za-z0-9]+)'/g, (match, page, key) => {
+            const fullRef = `${page}.${key}`;
+            if (validRefs.has(fullRef)) return match; // valid ref, keep it
+            // AI invented this ref — replace page name with plan page
+            return `'${plan.page}.${key}'`;
+          });
+        })
         .map((l) => `    ${l}`);
 
       if (stepLines.length > 0) {

@@ -361,14 +361,33 @@ export class PageCrawler {
             if (elementType === 'button' && visibleText && visibleText.length > 1 && visibleText.length < 30) {
               label = visibleText;
             }
+            // For buttons with very short text (✕, X, ×, >, <) — these are close/dismiss/arrow buttons
+            if (elementType === 'button' && visibleText && visibleText.length <= 2) {
+              // Try to get context from parent or nearby elements
+              const parentText = htmlEl.parentElement?.getAttribute('aria-label')
+                || htmlEl.closest('[class*="modal"], [class*="popup"], [class*="dialog"], [role="dialog"]')?.getAttribute('aria-label')
+                || '';
+              if (parentText) {
+                label = `Close ${parentText}`;
+              } else if (visibleText === '✕' || visibleText === '×' || visibleText === 'X' || visibleText === 'x') {
+                label = 'ClosePopup';
+              } else {
+                label = `Button${visibleText}`;
+              }
+            }
             // For inputs: prefer placeholder or name
             if (elementType === 'input' && !label && name) {
               label = name;
             }
             // Last resort: use id
             if (!label && id) label = id;
+            // Final fallback: use class-based description with element type
+            if (!label) {
+              const classes = Array.from(htmlEl.classList).slice(0, 2).join(' ');
+              if (classes) label = `${el.tagName.toLowerCase()} ${classes}`.substring(0, 30);
+            }
 
-            // Skip elements with no usable label at all
+            // Skip elements with truly no usable label at all
             if (!label || label.length < 2) return;
 
             const sanitized = label.replace(/[^a-zA-Z0-9\s]/g, '').trim();

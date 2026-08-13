@@ -351,9 +351,29 @@ export class PageCrawler {
             else if (elementType === 'link') prefix = 'Nav';
             key = prefix + keyWords.join('');
           } else {
-            // Fallback to label/placeholder/visible text
-            label = ariaLabel || placeholder || visibleText || id || '';
+            // Fallback: try multiple attributes for a meaningful label
+            const title = htmlEl.getAttribute('title') || '';
+            const name = htmlEl.getAttribute('name') || '';
+            const value = (htmlEl as HTMLInputElement).value || '';
+            label = ariaLabel || placeholder || title || name || '';
+            
+            // For buttons: prefer visible text over other attributes
+            if (elementType === 'button' && visibleText && visibleText.length > 1 && visibleText.length < 30) {
+              label = visibleText;
+            }
+            // For inputs: prefer placeholder or name
+            if (elementType === 'input' && !label && name) {
+              label = name;
+            }
+            // Last resort: use id
+            if (!label && id) label = id;
+
+            // Skip elements with no usable label at all
+            if (!label || label.length < 2) return;
+
             const sanitized = label.replace(/[^a-zA-Z0-9\s]/g, '').trim();
+            if (!sanitized || sanitized.length < 2) return;
+
             const words = sanitized.split(/\s+/).map((w: string) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase());
             let prefix = '';
             if (elementType === 'button') prefix = 'Btn';
@@ -361,8 +381,16 @@ export class PageCrawler {
             else if (elementType === 'select') prefix = 'Select';
             else if (elementType === 'textarea') prefix = 'Input';
             else if (elementType === 'link') prefix = 'Nav';
-            key = prefix + words.slice(0, 3).join('') || `Element${results.length + 1}`;
+            key = prefix + words.slice(0, 4).join('');
           }
+
+          // Skip elements with generic/empty keys (just the prefix with no identifier)
+          if (key === 'Btn' || key === 'Input' || key === 'Nav' || key === 'Select' || key.length <= 3) return;
+
+          // Skip duplicate keys — first one wins (use locator-based seen set + key check)
+          const keyForDedup = `KEY:${key}`;
+          if (seen.has(keyForDedup)) return;
+          seen.add(keyForDedup);
 
           results.push({
             key,

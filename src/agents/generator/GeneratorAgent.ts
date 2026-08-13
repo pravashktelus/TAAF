@@ -326,6 +326,40 @@ async function run(): Promise<void> {
   }
 
   // ── Step 4: Build element map (per page) ───────────────────────────────────
+  // First: filter crawled elements by relevance to the story's test cases
+  const storyKeywords = new Set<string>();
+  plan.testCases.forEach((tc) => {
+    // Extract meaningful keywords from actions and expected results
+    const text = tc.steps.map((s) => `${s.action} ${s.expected} ${s.testData}`).join(' ').toLowerCase();
+    text.split(/[\s'".,;:!?()]+/).forEach((w) => {
+      if (w.length > 3 && !['should', 'given', 'when', 'then', 'that', 'with', 'from', 'into', 'have', 'this', 'been', 'page'].includes(w)) {
+        storyKeywords.add(w);
+      }
+    });
+  });
+  // Also add navigation flow keywords
+  const navFlow = (plan as any).navigationFlow || '';
+  navFlow.toLowerCase().split(/[\s→>]+/).forEach((w: string) => {
+    if (w.length > 3) storyKeywords.add(w.replace(/[^a-z]/g, ''));
+  });
+
+  // Filter crawled snapshots: keep only elements relevant to story context
+  if (crawledSnapshots.size > 0) {
+    crawledSnapshots.forEach((snapshot) => {
+      const beforeCount = snapshot.elements.length;
+      snapshot.elements = snapshot.elements.filter((el) => {
+        const elText = `${el.key} ${el.label} ${el.locator}`.toLowerCase();
+        // Always keep: inputs, selects, textareas (likely needed for forms)
+        if (el.type === 'input' || el.type === 'select' || el.type === 'textarea') return true;
+        // Always keep: buttons with meaningful labels (close, submit, search, login)
+        if (el.type === 'button') return true;
+        // For links/other: only keep if keywords match
+        return [...storyKeywords].some((kw) => elText.includes(kw));
+      });
+      console.log(`[GeneratorAgent] Story-context filter: ${beforeCount} → ${snapshot.elements.length} elements (${beforeCount - snapshot.elements.length} irrelevant removed)`);
+    });
+  }
+
   const elementRefs = new Map<string, string>();    // key → PageName.ElementKey
   const newElementsByPage = new Map<string, (DiscoveredElement & { source: string })[]>();
 

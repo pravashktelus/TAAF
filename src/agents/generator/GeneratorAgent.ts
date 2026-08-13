@@ -316,7 +316,7 @@ async function run(): Promise<void> {
     } finally {
       if (crawler) await crawler.close();
     }
-  } else if (plan.url && plan.url.startsWith('http')) {
+  } else if (!isApiStory && plan.url && plan.url.startsWith('http')) {
     // No --url flag but plan has a URL — try loginAndNavigate
     console.log(`[GeneratorAgent] No --url flag but plan has URL. Attempting login + navigate to: ${plan.url}`);
     try {

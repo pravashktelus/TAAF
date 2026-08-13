@@ -113,7 +113,8 @@ export class SelfHealingEngine {
     const openAISuggestions = await this._getOpenAISuggestionsWithCleanedDOM(
       originalReference,
       resolvedLocator,
-      focusedDOM
+      focusedDOM,
+      action
     );
 
     const prioritizedCandidates = this._generatePrioritizedLocators(resolvedLocator, focusedDOM);
@@ -241,7 +242,34 @@ export class SelfHealingEngine {
       const count = await element.count();
       if (count === 0) return false;
 
-      return await element.first().isVisible().catch(() => false);
+      // If multiple elements match, check if at least one is visible + interactive
+      if (count > 1) {
+        // Try first visible, non-readonly, non-disabled element
+        for (let i = 0; i < Math.min(count, 5); i++) {
+          const el = element.nth(i);
+          const visible = await el.isVisible().catch(() => false);
+          if (!visible) continue;
+          const isDisabled = await el.isDisabled().catch(() => false);
+          const isReadonly = await el.getAttribute('readonly').catch(() => null);
+          if (!isDisabled && isReadonly === null) return true;
+        }
+        return false;
+      }
+
+      // Single element: check visible + interactive
+      const firstEl = element.first();
+      const visible = await firstEl.isVisible().catch(() => false);
+      if (!visible) return false;
+
+      // Check readonly/disabled for input elements
+      const tagName = await firstEl.evaluate((el) => el.tagName.toLowerCase()).catch(() => '');
+      if (tagName === 'input' || tagName === 'textarea' || tagName === 'select') {
+        const isDisabled = await firstEl.isDisabled().catch(() => false);
+        const isReadonly = await firstEl.getAttribute('readonly').catch(() => null);
+        if (isDisabled || isReadonly !== null) return false;
+      }
+
+      return true;
     } catch {
       return false;
     }
@@ -340,6 +368,16 @@ export class SelfHealingEngine {
             paths.add(`//*[@data-testid='${testId}']`);
           }
 
+          const dataQa = element.getAttribute('data-qa');
+          if (dataQa) {
+            paths.add(`//${element.tagName.toLowerCase()}[@data-qa='${dataQa}']`);
+          }
+
+          const dataCy = element.getAttribute('data-cy');
+          if (dataCy) {
+            paths.add(`//${element.tagName.toLowerCase()}[@data-cy='${dataCy}']`);
+          }
+
           const ariaLabel = element.getAttribute('aria-label');
           if (ariaLabel) {
             paths.add(`//*[@aria-label='${ariaLabel}']`);
@@ -409,13 +447,18 @@ export class SelfHealingEngine {
   private async _getOpenAISuggestionsWithCleanedDOM(
     reference: string,
     originalLocator: string,
-    cleanedDOM: string
+    cleanedDOM: string,
+    actionContext: string = ''
   ): Promise<string[]> {
     try {
+      const contextInfo = actionContext
+        ? `\nAction being performed: ${actionContext}\nFind the element that matches this action.`
+        : '';
+
       const suggestion = await OpenAIClient.suggestSelfHeal(
         originalLocator,
-        `Reference: ${reference}\nCleaned HTML Context:\n${cleanedDOM.substring(0, 3000)}`,
-        'Element not found with original locator'
+        `Reference: ${reference}${contextInfo}\nCleaned HTML Context:\n${cleanedDOM.substring(0, 3000)}`,
+        'Element not found with original locator. Suggest alternative locators that would uniquely identify this element. Prefer data-testid, data-qa, id, name attributes. Avoid ambiguous locators that match multiple elements.'
       );
 
       if (!suggestion) {
@@ -464,7 +507,9 @@ export class SelfHealingEngine {
     }
 
     if (rawLocator.startsWith('placeholder=')) {
-      return this.page.getByPlaceholder(rawLocator.replace('placeholder=', ''));
+      const placeholder = rawLocator.replace('placeholder=', '');
+      // Use :not([readonly]) to avoid matching readonly duplicates
+      return this.page.locator(`[placeholder="${placeholder}"]:not([readonly])`).first();
     }
 
     if (rawLocator.startsWith('role=')) {
@@ -480,6 +525,14 @@ export class SelfHealingEngine {
 
     if (rawLocator.startsWith('data-testid=')) {
       return this.page.getByTestId(rawLocator.replace('data-testid=', ''));
+    }
+
+    if (rawLocator.startsWith('data-qa=')) {
+      return this.page.locator(`[data-qa="${rawLocator.replace('data-qa=', '')}"]`);
+    }
+
+    if (rawLocator.startsWith('data-cy=')) {
+      return this.page.locator(`[data-cy="${rawLocator.replace('data-cy=', '')}"]`);
     }
 
     return this.page.locator(rawLocator);
@@ -507,6 +560,14 @@ export class SelfHealingEngine {
           if (role) attrs.push(`role="${role}"`);
           if (ariaLabel) attrs.push(`aria-label="${ariaLabel}"`);
           if (placeholder) attrs.push(`placeholder="${placeholder}"`);
+
+          // Also capture data-qa and data-cy
+          const dataQa = el.getAttribute('data-qa');
+          const dataCy = el.getAttribute('data-cy');
+          const name = el.getAttribute('name');
+          if (dataQa) attrs.push(`data-qa="${dataQa}"`);
+          if (dataCy) attrs.push(`data-cy="${dataCy}"`);
+          if (name) attrs.push(`name="${name}"`);
 
           if (attrs.length > 0) {
             const tag = el.tagName.toLowerCase();
@@ -547,6 +608,34 @@ export class SelfHealingEngine {
         locator: `page.getByTestId('${testId}')`,
         rawSelector: `data-testid=${testId}`,
         confidence: 97,
+      });
+    }
+
+    // data-qa attributes (common in many apps)
+    const dataQaMatches = focusedDOM.matchAll(/<(\w+)[^>]*data-qa="([^"]+)"[^>]*>([^<]*)/g);
+    for (const match of dataQaMatches) {
+      const tag = match[1];
+      const qa = match[2];
+      if (expectedTag && tag !== expectedTag) continue;
+      candidates.push({
+        type: 'data-qa',
+        locator: `page.locator('[data-qa="${qa}"]')`,
+        rawSelector: `//${tag}[@data-qa='${qa}']`,
+        confidence: 96,
+      });
+    }
+
+    // data-cy attributes (Cypress convention, used by many apps)
+    const dataCyMatches = focusedDOM.matchAll(/<(\w+)[^>]*data-cy="([^"]+)"[^>]*>([^<]*)/g);
+    for (const match of dataCyMatches) {
+      const tag = match[1];
+      const cy = match[2];
+      if (expectedTag && tag !== expectedTag) continue;
+      candidates.push({
+        type: 'data-cy',
+        locator: `page.locator('[data-cy="${cy}"]')`,
+        rawSelector: `//${tag}[@data-cy='${cy}']`,
+        confidence: 95,
       });
     }
 

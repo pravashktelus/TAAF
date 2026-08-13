@@ -2,7 +2,7 @@
 
 // Represents a single candidate locator generated during the healing process.
 export interface LocatorCandidate {
-  type: 'data-testid' | 'id' | 'role' | 'label' | 'placeholder' | 'text' | 'css' | 'xpath';
+  type: 'data-testid' | 'data-qa' | 'data-cy' | 'id' | 'role' | 'label' | 'placeholder' | 'text' | 'css' | 'xpath';
   locator: string;
   rawSelector: string;
   confidence: number;

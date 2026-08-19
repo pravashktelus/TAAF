@@ -90,7 +90,16 @@ export class StepPatternExtractor {
         .replace(/\\\./g, '.')                  // \. → .
         .replace(/\?/g, '')                     // remove optional markers
         .replace(/\s{2,}/g, ' ')                // collapse multiple spaces
+        .replace(/\|/g, ' / ')                  // | → / (alternatives)
+        .replace(/\(! in order\)/g, '')         // remove negative lookahead artifacts
+        .replace(/\(\[\\^'\\\"\\s\]\+\)/g, "'<value>'")
+        .replace(/\('\.\\+'\)/g, "'<value>'")
+        .replace(/\(\\w\+\)/g, '<word>')
+        .replace(/'/g, "'")                     // normalize quotes
         .trim();
+
+      // Skip patterns that are still messy/unreadable
+      if (pattern.includes('\\') || pattern.includes('(') || pattern.includes('[')) continue;
 
       if (pattern && pattern.length > 5 && pattern.length < 150) {
         patterns.push(`- ${keyword} ${pattern}`);

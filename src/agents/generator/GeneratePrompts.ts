@@ -262,14 +262,28 @@ ${realStepPatterns}
 - Cross-scenario variables: $$variableName
 - Scenario variables: {variableName}
 
-## Rules
+## CRITICAL Rules
 - Output ONLY Gherkin steps (no Feature/Scenario headers, no comments, no explanation)
 - One step per line, starting with When/Then/And
 - Use ONLY elements from the "Available Elements" list — do NOT invent page names or element keys
 - Use ONLY step patterns from the "Step Patterns from Framework" list — do NOT invent new step patterns
 - For multi-field forms (name, email, password, review), generate separate enter steps for EACH field
 - Include assertion steps (Then) for each expected result
-- If an element is not in the list, use '${pageName}.ElementKey' format with a descriptive key name`;
+- If an element is not in the list, use '${pageName}.ElementKey' format with a descriptive key name
+- Every click/enter/assert MUST use 'PageName.ElementKey' format — NEVER plain text like 'Sign In' or 'My Orders'
+
+## Examples of CORRECT step format
+- When I click 'TeleConnect.LoginSubmit'
+- When I enter '$$Email' into 'TeleConnect.LoginEmail'
+- Then 'TeleConnect.NavOrders' should be visible
+- Then the url should contain '/customer/orders'
+- When I click 'TeleConnect.NavOrders'
+- Then 'OrderHistory.OrderCard' should be visible
+
+## Examples of WRONG format (NEVER do this)
+- When I click 'Sign In'  ← WRONG: must be 'Page.Element' not plain text
+- Given I am on the page 'TeleConnect.NavOrders' ← WRONG: not a valid step
+- Then 'Support & Issues' should be visible ← WRONG: must be 'Page.Element' not text`;
   }
 
   /**

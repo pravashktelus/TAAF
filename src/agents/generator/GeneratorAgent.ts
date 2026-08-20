@@ -764,9 +764,9 @@ function _postFixFeature(
   }
   if (loginSubmitRef) {
     // Replace ANY button click that appears right after password entry — that's the login submit
-    // Pattern: enter password → click SOME button → click nav OR verify
+    // Pattern: enter password → click SOME button (handles When/And)
     fixed = fixed.replace(
-      new RegExp(`(into '${loginPasswordRef?.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') || 'TeleConnect.LoginPassword'}'\\s*\\n\\s*When I click )'[A-Z][a-zA-Z]+\\.[A-Za-z]+'`, 'g'),
+      new RegExp(`(into '${loginPasswordRef?.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') || 'TeleConnect.LoginPassword'}'\\s*\\n\\s*(?:When|And) I click )'[A-Z][a-zA-Z]+\\.[A-Za-z]+'`, 'g'),
       `$1'${loginSubmitRef}'`
     );
   }
@@ -786,6 +786,10 @@ function _postFixFeature(
 
   // 9. Fix doubled single quotes in element refs
   fixed = fixed.replace(/''/g, "'");
+
+  // 10. Remove AI-invented modifiers after element refs ('with self-healing', 'in order', etc.)
+  fixed = fixed.replace(/' with self-healing/g, "'");
+  fixed = fixed.replace(/' with retry/g, "'");
 
   return fixed;
 }

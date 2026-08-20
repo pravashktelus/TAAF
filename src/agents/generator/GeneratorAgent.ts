@@ -569,6 +569,26 @@ async function run(): Promise<void> {
     unresolvedElements.forEach((key) => console.warn(`    - ${plan.page}.${key}`));
     console.warn(`  These elements need real locators before tests will pass.`);
     console.warn(`  Fix: Use Playwright MCP or provide --url to crawl the live DOM.${urlHint}\n`);
+
+    // Write placeholder entries to .properties with TODO comment (locator value empty — fill manually)
+    const propsPath = path.resolve(process.cwd(), 'src', 'pages', 'properties', `${plan.page}.properties`);
+    if (fs.existsSync(propsPath)) {
+      const existingContent = fs.readFileSync(propsPath, 'utf-8');
+      const existingKeys = existingContent.split('\n')
+        .filter((l) => l.includes('=') && !l.startsWith('#'))
+        .map((l) => l.split('=')[0].trim());
+
+      const newPlaceholders = unresolvedElements.filter((key) => !existingKeys.includes(key));
+      if (newPlaceholders.length > 0) {
+        const lines: string[] = ['', `# TODO: Add locators for unresolved elements (visible after interaction)`];
+        newPlaceholders.forEach((key) => {
+          lines.push(`# TODO: Fill locator — inspect live DOM after navigating to this state`);
+          lines.push(`${key}=`);
+        });
+        fs.appendFileSync(propsPath, lines.join('\n') + '\n', 'utf-8');
+        console.log(`[GeneratorAgent] Added ${newPlaceholders.length} placeholder(s) to ${plan.page}.properties — fill locators manually`);
+      }
+    }
   }
 
   // ── Step 7b: Validate output (P6 — gate before --apply) ───────────────────

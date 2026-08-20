@@ -484,9 +484,28 @@ async function run(): Promise<void> {
       }).slice(0, 40);
 
       // If too few matched, include the first 30 elements as general context
+      // Include locator info so AI can match action text to correct element
+      const formatElementWithLabel = (ref: string): string => {
+        const parts = ref.split('.');
+        if (parts.length < 2) return `  '${ref}'`;
+        const pageName = parts[0];
+        const key = parts[1];
+        const pageElements = registry.getPageElements(pageName);
+        const el = pageElements.find((e) => e.elementKey === key);
+        if (el && el.locator) {
+          // Extract readable hint from locator: data-testid='login-submit' → "login-submit"
+          const testIdMatch = el.locator.match(/(?:data-testid|data-qa|data-cy)='([^']+)'/);
+          const textMatch = el.locator.match(/text=(.+)/);
+          const placeholderMatch = el.locator.match(/placeholder=(.+)/);
+          const hint = testIdMatch?.[1] || textMatch?.[1] || placeholderMatch?.[1] || '';
+          return hint ? `  '${ref}' (${hint})` : `  '${ref}'`;
+        }
+        return `  '${ref}'`;
+      };
+
       const availableElements = relevantElements.length >= 5 
-        ? relevantElements.map((ref) => `  '${ref}'`)
-        : allElements.slice(0, 30).map((ref) => `  '${ref}'`);
+        ? relevantElements.map(formatElementWithLabel)
+        : allElements.slice(0, 30).map(formatElementWithLabel);
 
       // Per-AC AI call
       const acPrompt = isApiStory
@@ -744,8 +763,12 @@ function _postFixFeature(
     fixed = fixed.replace(/'[A-Z][a-zA-Z]+\.(?:Input)?Password'/g, `'${loginPasswordRef}'`);
   }
   if (loginSubmitRef) {
-    // Replace wrong submit buttons used for login (BtnSubmitOrder, BtnSubmit when in login context)
-    fixed = fixed.replace(/'[A-Z][a-zA-Z]+\.Btn(?:Submit|SubmitOrder|Login|SignIn)'(?=\s*\n\s*(?:When I click|Then).*(?:Nav|Orders|Dashboard))/g, `'${loginSubmitRef}'`);
+    // Replace ANY button click that appears right after password entry — that's the login submit
+    // Pattern: enter password → click SOME button → click nav OR verify
+    fixed = fixed.replace(
+      new RegExp(`(into '${loginPasswordRef?.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') || 'TeleConnect.LoginPassword'}'\\s*\\n\\s*When I click )'[A-Z][a-zA-Z]+\\.[A-Za-z]+'`, 'g'),
+      `$1'${loginSubmitRef}'`
+    );
   }
 
   // 7. Fix "Then 'text content' should be visible" → needs Page.Element format

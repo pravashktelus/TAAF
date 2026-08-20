@@ -317,8 +317,10 @@ export class PageCrawler {
         const role = node.role;
         const name = node.name || '';
 
-        // Skip non-interactive roles
-        if (!['button', 'textbox', 'combobox', 'checkbox', 'radio', 'link', 'searchbox', 'spinbutton', 'slider', 'menuitem'].includes(role)) continue;
+        // Skip non-interactive roles (but keep generic/group with a name — those are often clickable elements)
+        const interactiveRoles = ['button', 'textbox', 'combobox', 'checkbox', 'radio', 'link', 'searchbox', 'spinbutton', 'slider', 'menuitem', 'tab', 'switch'];
+        const isClickableGeneric = (role === 'generic' || role === 'group') && name && name.length > 1;
+        if (!interactiveRoles.includes(role) && !isClickableGeneric) continue;
 
         // Skip links beyond limit
         if (role === 'link') {
@@ -337,7 +339,13 @@ export class PageCrawler {
         // Build locator — prefer role + name (what Playwright actually uses)
         let locator = '';
         if (name && name.length > 1) {
-          locator = `role=${role}[name='${name.replace(/'/g, "\\'")}']`;
+          if (role === 'generic' || role === 'group') {
+            // Generic/group elements use text= locator (no proper role for getByRole)
+            locator = `text=${name}`;
+            elementType = 'button'; // treat clickable generics as buttons
+          } else {
+            locator = `role=${role}[name='${name.replace(/'/g, "\\'")}']`;
+          }
         } else {
           continue; // Skip elements without a name — not reliably locatable
         }

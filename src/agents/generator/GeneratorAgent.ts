@@ -498,7 +498,7 @@ async function run(): Promise<void> {
       }).join('\n');
 
       const aiSteps = await LLMClient.askWithSystem(
-        'You are a BDD automation expert. Output ONLY Gherkin steps — no explanation, no markdown, no headers.',
+        'You are a BDD automation expert. Output ONLY Gherkin steps — no explanation, no markdown, no headers. IMPORTANT: Include ALL steps from the test case — do NOT skip login, navigation, or setup steps even if they seem repetitive. Every scenario runs independently in a fresh browser so ALL steps must be present.',
         acPrompt,
         deterministicFallback
       );

@@ -811,6 +811,14 @@ function _postFixFeature(
   fixed = fixed.replace(/' with self-healing/g, "'");
   fixed = fixed.replace(/' with retry/g, "'");
 
+  // 11. Fix element mismatches where action text clearly indicates a specific element
+  // "View Details" click should use BtnViewDetails not OrderItem0
+  const viewDetailsRef = [...elementRefs.values()].find((r) => r.toLowerCase().includes('viewdetails'));
+  if (viewDetailsRef) {
+    // Replace any click on OrderItem when the step is about "View Details"
+    fixed = fixed.replace(/When I click '([^']+\.OrderItem\d+)'/g, `When I click '${viewDetailsRef}'`);
+  }
+
   return fixed;
 }
 

@@ -455,50 +455,84 @@ export class PageCrawler {
     const elements = await this.page.evaluate(() => {
       const results: any[] = [];
       const seen = new Set<string>();
+      const MAX_ELEMENTS = 60;
 
-      document.querySelectorAll('button, input, select, textarea, [role="button"], [data-testid], [data-qa], [data-cy]').forEach((el) => {
+      // Query ALL elements — handles any DOM style (modern SPA or classic HTML)
+      document.querySelectorAll('*').forEach((el) => {
+        if (results.length >= MAX_ELEMENTS) return;
         const htmlEl = el as HTMLElement;
-        if (htmlEl.offsetParent === null) return;
-        if ((htmlEl as HTMLInputElement).readOnly) return;
-
-        const testId = el.getAttribute('data-testid');
-        const dataQa = el.getAttribute('data-qa');
-        const dataCy = el.getAttribute('data-cy');
-        const placeholder = el.getAttribute('placeholder') || '';
-        const name = el.getAttribute('name') || '';
-        const ariaLabel = el.getAttribute('aria-label') || '';
-        const visibleText = (htmlEl.textContent || '').trim().substring(0, 30);
         const tag = el.tagName.toLowerCase();
 
-        const keySource = testId || dataQa || dataCy || ariaLabel || placeholder || name || visibleText;
+        // Skip non-useful tags
+        const skipTags = ['html', 'head', 'body', 'script', 'style', 'meta', 'link', 'br', 'hr', 'svg', 'path', 'img', 'iframe', 'noscript', 'table', 'tr', 'td', 'th', 'tbody', 'thead', 'div', 'span', 'p', 'ul', 'ol', 'li', 'form', 'label', 'section', 'article', 'main', 'footer', 'header', 'nav'];
+        // Allow: input, select, textarea, button, a, h1-h3, and elements with special attributes
+        const hasSpecialAttr = el.getAttribute('data-testid') || el.getAttribute('data-qa') || el.getAttribute('data-cy') || el.getAttribute('role');
+        const isFormElement = ['input', 'select', 'textarea', 'button'].includes(tag);
+        const isLink = tag === 'a';
+        const isHeading = ['h1', 'h2', 'h3'].includes(tag);
+
+        if (!isFormElement && !isLink && !isHeading && !hasSpecialAttr) return;
+
+        // Skip invisible
+        if (htmlEl.offsetParent === null && tag !== 'input') return;
+
+        const inputType = (htmlEl as HTMLInputElement).type || '';
+        if (tag === 'input' && inputType === 'hidden') return;
+        if ((htmlEl as HTMLInputElement).readOnly && tag === 'input' && inputType !== 'submit') return;
+
+        const name = el.getAttribute('name') || '';
+        const id = el.getAttribute('id') || '';
+        const testId = el.getAttribute('data-testid') || '';
+        const dataQa = el.getAttribute('data-qa') || '';
+        const dataCy = el.getAttribute('data-cy') || '';
+        const placeholder = el.getAttribute('placeholder') || '';
+        const ariaLabel = el.getAttribute('aria-label') || '';
+        const value = (htmlEl as HTMLInputElement).value || '';
+        const href = el.getAttribute('href') || '';
+        const visibleText = (htmlEl.textContent || '').trim().substring(0, 40);
+        const role = el.getAttribute('role') || '';
+
+        // Determine key source
+        const keySource = testId || dataQa || dataCy || id || name || ariaLabel || placeholder || value || visibleText;
         if (!keySource || keySource.length < 2) return;
 
+        // Build locator
         let locator = '';
         if (testId) locator = `//${tag}[@data-testid='${testId}']`;
         else if (dataQa) locator = `//${tag}[@data-qa='${dataQa}']`;
         else if (dataCy) locator = `//${tag}[@data-cy='${dataCy}']`;
+        else if (id) locator = `#${id}`;
+        else if (name && isFormElement) locator = `//${tag}[@name='${name}']`;
         else if (placeholder) locator = `placeholder=${placeholder}`;
-        else if (ariaLabel) locator = `role=${tag === 'button' ? 'button' : 'textbox'}[name='${ariaLabel}']`;
-        else locator = `text=${visibleText}`;
+        else if (inputType === 'submit' && value) locator = `//input[@value='${value}']`;
+        else if (ariaLabel) locator = `role=${role || tag}[name='${ariaLabel}']`;
+        else if (visibleText && visibleText.length > 1 && visibleText.length < 40) locator = `text=${visibleText}`;
+        else return;
 
         if (seen.has(locator)) return;
         seen.add(locator);
 
+        // Determine type
         let elementType = 'other';
-        if (tag === 'button' || el.getAttribute('role') === 'button') elementType = 'button';
+        if (tag === 'button' || role === 'button' || inputType === 'submit') elementType = 'button';
         else if (tag === 'input' || tag === 'textarea') elementType = 'input';
-        else if (tag === 'select') elementType = 'select';
+        else if (tag === 'select' || role === 'combobox') elementType = 'select';
+        else if (tag === 'a') elementType = 'link';
+        else if (isHeading) elementType = 'other';
 
+        // Generate key
         let prefix = '';
         if (elementType === 'button') prefix = 'Btn';
         else if (elementType === 'input') prefix = 'Input';
         else if (elementType === 'select') prefix = 'Select';
+        else if (elementType === 'link') prefix = 'Nav';
 
-        const sanitized = keySource.replace(/[^a-zA-Z0-9\s]/g, '').trim();
+        const sanitized = (name || id || ariaLabel || placeholder || value || visibleText).replace(/[^a-zA-Z0-9\s]/g, '').trim();
         const words = sanitized.split(/[\s-_]+/).slice(0, 4).map((w: string) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase());
         const key = prefix + words.join('');
 
-        if (key.length <= 3) return;
+        if (key.length <= 3 || seen.has(`KEY:${key}`)) return;
+        seen.add(`KEY:${key}`);
 
         results.push({ key, locator, type: elementType, label: keySource, tag });
       });

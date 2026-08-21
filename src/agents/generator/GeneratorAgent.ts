@@ -815,9 +815,34 @@ function _postFixFeature(
   // "View Details" click should use BtnViewDetails not OrderItem0
   const viewDetailsRef = [...elementRefs.values()].find((r) => r.toLowerCase().includes('viewdetails'));
   if (viewDetailsRef) {
-    // Replace any click on OrderItem when the step is about "View Details"
     fixed = fixed.replace(/When I click '([^']+\.OrderItem\d+)'/g, `When I click '${viewDetailsRef}'`);
   }
+
+  // 12. API-specific fixes
+  // "response status code should be" → "response status should be"
+  fixed = fixed.replace(/response status code should be/g, 'response status should be');
+  // "response body field 'x' should be 'y'" → "response body field 'x' should equal 'y'"
+  fixed = fixed.replace(/response body field '([^']+)' should be '([^']+)'/g, "response body field '$1' should equal '$2'");
+  // "I set the base URL" → "I set the base url" (case fix)
+  fixed = fixed.replace(/I set the base URL/g, 'I set the base url');
+  // Remove duplicate "Given I set the base url" when Background already has it
+  if (fixed.includes('Background:') && fixed.includes("Given I set the base url")) {
+    // Keep only the one in Background, remove from scenarios
+    const lines = fixed.split('\n');
+    let inBackground = false;
+    let backgroundUrlDone = false;
+    const cleaned = lines.filter((line) => {
+      if (line.trim().startsWith('Background:')) { inBackground = true; return true; }
+      if (inBackground && line.trim().startsWith('Given I set the base url')) { backgroundUrlDone = true; return true; }
+      if (inBackground && line.trim().startsWith('Scenario') || line.trim().startsWith('@')) { inBackground = false; }
+      // Remove base url lines inside scenarios if Background already has one
+      if (backgroundUrlDone && !inBackground && line.trim().startsWith('Given I set the base url')) return false;
+      return true;
+    });
+    fixed = cleaned.join('\n');
+  }
+  // "Then I store" → "And I store" (store is usually continuation)
+  fixed = fixed.replace(/\n(\s*)Then I store/g, '\n$1And I store');
 
   return fixed;
 }

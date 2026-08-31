@@ -10,6 +10,9 @@
 
 **Flow:** Login Page → Register → Dashboard → New Connection → Step 1 (Customer Info) → Step 2 (Location) → Step 3 (Plan Selection) → Step 4 (Offers) → Step 5 (Schedule Installation) → Step 6 (Confirm & Submit) → Order Success
 
+
+
+
 ## Detailed Steps
 
 ### Step 1: Registration

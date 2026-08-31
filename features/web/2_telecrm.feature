@@ -12,11 +12,12 @@ Feature: 2_TeleConnect - Orders flow down from order placement apps to CRM activ
         Then I click 'TeleCRM.CRMButton'
         And I click 'TeleCRM.LoginSubmit'
         And 'TeleCRM.CRMHomePage' should be visible
-        
+
+        # ═══ Verify Order is Visible (Dynamic - targets specific order) ═══
+        Then order containing '$$OrderId' should be visible
 
         # ═══ Review Order Details - Positive Flow ═══
-        Then I enter '$$OrderId' into 'TeleCRM.CRMHomeSearch'
-        And I click 'TeleCRM.CRMReview'
+        When I click 'TeleCRM.CRMReview' in order containing '$$OrderId'
         And I enter 'Review Done!!' into 'TeleCRM.CRMReviewNotes'
         And I click 'TeleCRM.CRMReviewButton'
         And 'TeleCRM.CRMApproveButton' should be visible
@@ -26,7 +27,6 @@ Feature: 2_TeleConnect - Orders flow down from order placement apps to CRM activ
         And I click 'TeleCRM.CRMPopupAddress'
         And I click 'TeleCRM.CRMPopupPlanElig'
         And I click 'TeleCRM.CRMPopupApproveOrder'
-        
 
         And 'TeleCRM.CRMStatus' should be visible
         And I click 'TeleCRM.CRMLogout'

@@ -51,6 +51,18 @@ export class AgentsConfig {
     return this._get('agents.output.dir', 'generated');
   }
 
+  // Sampling temperature for AI generation.
+  //   • A number (e.g. 0) → sent to the model for deterministic output.
+  //   • "default" or "none" → OMIT temperature entirely (required by some
+  //     reasoning/o-series models that only accept the default value of 1).
+  // Default is 0 (deterministic) for models that support it.
+  get aiTemperature(): number | undefined {
+    const raw = this._get('agents.ai.temperature', '0').trim().toLowerCase();
+    if (raw === 'default' || raw === 'none' || raw === '') return undefined;
+    const n = Number(raw);
+    return isNaN(n) ? undefined : n;
+  }
+
   // App URL — reused from existing framework config (read-only)
   get appUrl(): string {
     return this._get('app.url', '');

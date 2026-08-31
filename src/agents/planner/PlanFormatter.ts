@@ -2,6 +2,30 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { AgentsConfig } from '../config/AgentsConfig';
 
+// ─── Credential Detection & Masking ─────────────────────────────────────────
+
+/**
+ * Detects if a value is a credential (email, password, token).
+ */
+function _isCredential(value: string): boolean {
+  if (!value || value.length < 4) return false;
+  // Looks like an email
+  if (value.match(/^[^\s@]+@[^\s@]+\.[^\s@]+$/)) return true;
+  // Looks like a password (mixed case + number/special, 6+ chars)
+  if (value.length >= 6 && value.match(/[A-Z]/) && value.match(/[a-z]/) && value.match(/[0-9!@#$%^&*]/)) return true;
+  // Looks like a token/key (long alphanumeric)
+  if (value.length > 20 && value.match(/^[A-Za-z0-9_\-]+$/)) return true;
+  return false;
+}
+
+/**
+ * Masks a credential for display: first 2 chars + *****
+ */
+function _mask(value: string): string {
+  if (!value || value.length <= 2) return '*****';
+  return value.substring(0, 2) + '*****';
+}
+
 /**
  * Represents a parsed test case from AI response.
  */
@@ -64,12 +88,18 @@ export class PlanFormatter {
   format(
     aiResponse: string,
     pageName: string,
-    sourceFile: string
+    sourceFile: string,
+    analysis?: { detected: string[]; assumptions: string[]; warnings: string[]; dependencies: string[] }
   ): { mdPath: string; jsonPath: string } {
     this._ensureOutputDir();
 
     // Parse AI response
     const plan = this._parseResponse(aiResponse, pageName, sourceFile);
+
+    // Attach analysis metadata to the plan
+    if (analysis) {
+      (plan as any).analysis = analysis;
+    }
 
     // Write files
     const jsonPath = this._writeJson(plan, pageName, sourceFile);
@@ -126,13 +156,65 @@ export class PlanFormatter {
       title: tc.title || 'Untitled Test Case',
       type: tc.type || 'happy_path',
       navigation: tc.navigation || '',
-      steps: (tc.steps || []).map((s: any, si: number) => ({
-        stepNo: s.stepNo || si + 1,
-        action: s.action || '',
-        navigation: s.navigation || '',
-        testData: s.testData || '',
-        expected: s.expected || '',
-      })),
+      steps: (tc.steps || []).map((s: any, si: number) => {
+        const action = s.action || '';
+        const actionLower = action.toLowerCase();
+        // Infer expected result if empty
+        let expected = s.expected || '';
+        if (!expected) {
+          // ── API-specific expected results ──
+          if (actionLower.includes('set the base url') || actionLower.includes('set base url')) {
+            expected = 'Base URL is set';
+          } else if (actionLower.includes('set bearer token') || actionLower.includes('set api key')) {
+            expected = 'Auth header is set';
+          } else if (actionLower.match(/send a get request/)) {
+            expected = 'GET request is sent and response received';
+          } else if (actionLower.match(/send a post request/)) {
+            expected = 'POST request is sent and resource created';
+          } else if (actionLower.match(/send a put request|send a patch request/)) {
+            expected = 'Request is sent and resource updated';
+          } else if (actionLower.match(/send a delete request/)) {
+            expected = 'DELETE request is sent and resource removed';
+          } else if (actionLower.includes('response status')) {
+            expected = action.replace(/^(?:verify:?\s*)/i, 'Response ');
+          } else if (actionLower.includes('response body field') && actionLower.includes('should exist')) {
+            const field = action.match(/field ['"]([^'"]+)['"]/i);
+            expected = field ? `Field '${field[1]}' exists in response` : 'Field exists in response';
+          } else if (actionLower.includes('response body field') && (actionLower.includes('should equal') || actionLower.includes('should be'))) {
+            const field = action.match(/field ['"]([^'"]+)['"].*['"]([^'"]+)['"]/i);
+            expected = field ? `Field '${field[1]}' equals '${field[2]}'` : 'Field matches expected value';
+          } else if (actionLower.includes('store') && actionLower.includes('response')) {
+            const varMatch = action.match(/as ['"]([^'"]+)['"]/i);
+            expected = varMatch ? `Response value stored as '${varMatch[1]}'` : 'Response value stored';
+          }
+          // ── Web/generic expected results ──
+          else if (actionLower.startsWith('verify') || actionLower.startsWith('confirm') || actionLower.startsWith('assert')) {
+            expected = action.replace(/^(?:verify:?\s*|confirm:?\s*|assert:?\s*)/i, '').trim() || action;
+          } else if (actionLower.startsWith('navigate') || actionLower.includes('navigate to') || actionLower.startsWith('open')) {
+            expected = 'Page loaded successfully';
+          } else if (actionLower.startsWith('click')) {
+            const target = action.match(/["'"]([^"'"]+)["'"]/);
+            expected = target ? `"${target[1]}" clicked successfully` : 'Element clicked successfully';
+          } else if (actionLower.startsWith('enter') || actionLower.startsWith('type') || actionLower.startsWith('fill')) {
+            const field = action.match(/(?:into|in)\s+(?:the\s+)?["'"]([^"'"]+)["'"]/i);
+            expected = field ? `Value entered in "${field[1]}" field` : 'Value entered successfully';
+          } else if (actionLower.startsWith('select')) {
+            const opt = action.match(/select\s+["'"]?([^"'"]+)["'"]?\s+from/i);
+            expected = opt ? `"${opt[1].trim()}" selected` : 'Option selected successfully';
+          } else if (actionLower.startsWith('check')) {
+            expected = 'Checkbox checked';
+          } else {
+            expected = 'Step completed successfully';
+          }
+        }
+        return {
+          stepNo: s.stepNo || si + 1,
+          action,
+          navigation: s.navigation || '',
+          testData: s.testData || '',
+          expected,
+        };
+      }),
       edgeCases: tc.edgeCases || [],
     }));
   }
@@ -176,6 +258,33 @@ export class PlanFormatter {
     lines.push(`| Total Test Cases | ${plan.testCases.length} |`);
     lines.push('');
 
+    // Analysis & Assumptions section
+    const analysis = (plan as any).analysis;
+    if (analysis) {
+      lines.push('## Analysis & Assumptions');
+      lines.push('');
+      if (analysis.detected?.length > 0) {
+        lines.push('**Detected:**');
+        analysis.detected.forEach((d: string) => lines.push(`- ${d}`));
+        lines.push('');
+      }
+      if (analysis.assumptions?.length > 0) {
+        lines.push('**Assumptions:**');
+        analysis.assumptions.forEach((a: string) => lines.push(`- ${a}`));
+        lines.push('');
+      }
+      if (analysis.dependencies?.length > 0) {
+        lines.push('**Dependencies:**');
+        analysis.dependencies.forEach((d: string) => lines.push(`- ${d}`));
+        lines.push('');
+      }
+      if (analysis.warnings?.length > 0) {
+        lines.push('**⚠️ Warnings / Ambiguities:**');
+        analysis.warnings.forEach((w: string) => lines.push(`- ${w}`));
+        lines.push('');
+      }
+    }
+
     // Discovered elements summary
     if (plan.elements && plan.elements.length > 0) {
       lines.push('## Discovered Page Elements');
@@ -212,7 +321,27 @@ export class PlanFormatter {
           lines.push('|---|---|---|---|');
           tc.steps.forEach((s) => {
             const actionNav = [s.action, s.navigation].filter(Boolean).join(' → ');
-            lines.push(`| ${s.stepNo} | ${actionNav || '-'} | ${s.testData || '-'} | ${s.expected || '-'} |`);
+            // Detect if this step interacts with a sensitive field
+            const isSensitiveStep = /(?:password|passwd|username|user.?name|email|token|secret|credential|api.?key)/i.test(actionNav);
+
+            let displayAction = actionNav || '-';
+            let displayData = s.testData || '-';
+
+            if (isSensitiveStep) {
+              // Mask all quoted values in the action text that look like data (not field names)
+              displayAction = actionNav.replace(
+                /((?:enter|type)\s+)["'"]([^"'"]+)["'"]/gi,
+                (match, prefix, val) => `${prefix}"${_mask(val)}"`
+              );
+              // Mask testData
+              if (s.testData && s.testData !== '-') {
+                displayData = _mask(s.testData);
+              }
+            } else if (s.testData && _isCredential(s.testData)) {
+              displayData = _mask(s.testData);
+            }
+
+            lines.push(`| ${s.stepNo} | ${displayAction} | ${displayData} | ${s.expected || '-'} |`);
           });
           lines.push('');
         }

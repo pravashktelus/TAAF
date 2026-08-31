@@ -48,3 +48,30 @@ logs/
 
 # OS files
 Thumbs.db
+
+# Dev application source repo (cloned for source-repo scanning — not for source control)
+.devrepo/
+
+# ─── Secrets (bulletproof — never commit any real .env) ───────────────────────
+# .env is matched above; be explicit about nested/variant env files too.
+.env
+.env.*
+!.env.example
+features/.env
+**/.env
+**/*.env
+# but always allow the safe template
+!**/.env.example
+
+# ─── Non-execution / scratch files (not needed to run the framework) ──────────
+# Stale duplicate knowledge bank (active bank lives in src/agents/knowledge/)
+KB/
+# Stray/backup properties copy (real one is src/pages/properties/)
+others/
+# Visual-testing baselines (regenerated; large binaries)
+test-baselines/
+# Ad-hoc scripts
+test-upload.sh
+# Source-index cache (regenerated from the dev repo each run)
+source-index.json
+generated/source-index.json

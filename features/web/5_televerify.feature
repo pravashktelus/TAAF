@@ -6,7 +6,7 @@ Feature: 5_TeleConnect - Verify Broadband Order Activation Status
 
     @smoke @e2e
     Scenario: Verify broadband order status shows Activated on customer dashboard
-        Given I navigate to 'https://simulapp.online/login'
+        Given I navigate to the application
 
         # ═══ Login ═══
         When I enter '$$Email' into 'TeleConnect.LoginEmail'
@@ -16,7 +16,7 @@ Feature: 5_TeleConnect - Verify Broadband Order Activation Status
 
         # ═══ Dashboard Verification ═══
         Then 'TeleVerify.OrderList' should be visible
-        And 'TeleVerify.OrderCard' should be visible
+        And order containing '$$OrderId' should be visible
         And 'TeleVerify.OrderStatusBadge' should contain text 'ACTIVATED'
 
         # ═══ Logout ═══

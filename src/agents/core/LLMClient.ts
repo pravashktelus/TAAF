@@ -79,17 +79,60 @@ export class LLMClient {
     }
   }
 
+  // ─── Token Tracking ────────────────────────────────────────────────────────
+  private static totalInputTokens = 0;
+  private static totalOutputTokens = 0;
+  private static totalCalls = 0;
+
+  static getTokenUsage(): { inputTokens: number; outputTokens: number; totalCalls: number; estimatedCost: string } {
+    const inputCost = (this.totalInputTokens / 1_000_000) * 10; // $10/1M for gpt-4-turbo input
+    const outputCost = (this.totalOutputTokens / 1_000_000) * 30; // $30/1M for gpt-4-turbo output
+    const total = inputCost + outputCost;
+    return {
+      inputTokens: this.totalInputTokens,
+      outputTokens: this.totalOutputTokens,
+      totalCalls: this.totalCalls,
+      estimatedCost: `$${total.toFixed(4)}`,
+    };
+  }
+
+  static resetTokenUsage(): void {
+    this.totalInputTokens = 0;
+    this.totalOutputTokens = 0;
+    this.totalCalls = 0;
+  }
+
+  static printTokenUsage(): void {
+    const usage = this.getTokenUsage();
+    console.log(`[LLMClient] Token Usage: ${usage.inputTokens} input + ${usage.outputTokens} output (${usage.totalCalls} calls) ≈ ${usage.estimatedCost}`);
+  }
+
   // ─── Provider Implementations ─────────────────────────────────────────────
 
   private static async _callOpenAI(messages: { role: string; content: string }[]): Promise<string> {
     const { default: OpenAI } = await import('openai');
     const client = new OpenAI({ apiKey: this.config.openAIApiKey });
 
-    const response = await client.chat.completions.create({
+    // Deterministic generation (temperature 0) reduces redundant assertions and
+    // hallucinated steps. BUT some reasoning/o-series models reject any value
+    // other than the default (1) and error out. So temperature is CONFIGURABLE
+    // (agents.ai.temperature) and only sent when defined — set it to "default"
+    // for models that don't allow overriding it.
+    const params: any = {
       model: this.config.aiModel,
-      max_tokens: 4096,
       messages: messages as any,
-    });
+    };
+    const temp = this.config.aiTemperature;
+    if (temp !== undefined) params.temperature = temp;
+
+    const response = await client.chat.completions.create(params);
+
+    // Track token usage
+    if (response.usage) {
+      this.totalInputTokens += response.usage.prompt_tokens || 0;
+      this.totalOutputTokens += response.usage.completion_tokens || 0;
+    }
+    this.totalCalls++;
 
     return response.choices[0]?.message?.content?.trim() || '';
   }

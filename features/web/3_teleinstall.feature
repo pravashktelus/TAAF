@@ -14,21 +14,22 @@ Feature: 3_TeleConnect - Installation Process for Approved Orders
         And I click 'TeleInstall.LoginSubmit'
         And 'TeleInstall.InstallHomePage' should be visible
 
+        # ═══ Verify Order Card is Visible (Dynamic) ═══
+        Then order containing '$$OrderId' should be visible
+
         # ═══ Schedule Installation - Positive Flow ═══
-        Then I enter '$$OrderId' into 'TeleInstall.InstallHomeSearch'
-        And 'TeleInstall.InstallOrderCard' should be visible
-        And I click 'TeleInstall.InstallScheduleButton'
-        And I enter '2026-06-26' into 'TeleInstall.InstallScheduleDate'
+        When I click 'TeleInstall.InstallScheduleButton' in order containing '$$OrderId'
+        And I enter '2026-09-15' into 'TeleInstall.InstallScheduleDate'
         And I select 'Morning (9 AM - 12 PM)' from 'TeleInstall.InstallSlotSelect'
         And I enter '##FullName' into 'TeleInstall.InstallTechnicianName'
         And I click 'TeleInstall.InstallConfirmSchedule'
 
         # ═══ Verify Scheduled Status ═══
-        Then I enter '$$OrderId' into 'TeleInstall.InstallHomeSearch'
+        Then order containing '$$OrderId' should be visible
         And 'TeleInstall.InstallStatusScheduled' should be visible
 
         # ═══ Complete Installation - Positive Flow ═══
-        And I click 'TeleInstall.InstallCompleteButton'
+        When I click 'TeleInstall.InstallCompleteButton' in order containing '$$OrderId'
         And I click 'TeleInstall.InstallCheckCable'
         And I click 'TeleInstall.InstallCheckRouter'
         And I click 'TeleInstall.InstallCheckSpeed'

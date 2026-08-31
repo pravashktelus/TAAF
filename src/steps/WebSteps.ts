@@ -1,4 +1,5 @@
 import { Given, When, Then, DataTable } from '@cucumber/cucumber';
+import { expect } from '@playwright/test';
 import { CustomWorld } from '../core/CustomWorld';
 import { DataStore } from '../utils/DataStore';
 import { PersistentStore } from '../utils/PersistentStore';
@@ -47,7 +48,7 @@ When(
 );
 
 When(
-  /^I click ['"](.+)['"]$/,
+  /^I click ['"]([^'"]+)['"](?! in order)$/,
   async function (this: CustomWorld, elementRef: string) {
     await this.actionEngine.click(elementRef);
   }
@@ -407,5 +408,65 @@ Then(
       }
     });
     Logger.info('Injected JS: Changed "New Connection" button to "Apply Connection" and modified data-testid');
+  }
+);
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Dynamic Order Steps — Target specific order row/card by Order ID
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// Click the order row/card that contains the specific order ID text
+// Usage: I click order containing '$$OrderId'
+When(
+  /^I click order containing ['"](.+)['"]$/,
+  async function (this: CustomWorld, value: string) {
+    const resolvedValue = (this.actionEngine as any).resolveValue(value);
+    Logger.info(`Clicking order containing: "${resolvedValue}"`);
+    const locator = this.getPage().locator(`tr:has-text("${resolvedValue}"), [data-testid*="card"]:has-text("${resolvedValue}"), [data-testid*="order"]:has-text("${resolvedValue}")`).first();
+    await locator.scrollIntoViewIfNeeded();
+    await locator.click();
+  }
+);
+
+// Verify an order row/card containing specific text is visible
+// Usage: Then order containing '$$OrderId' should be visible
+Then(
+  /^order containing ['"](.+)['"] should be visible$/,
+  async function (this: CustomWorld, value: string) {
+    const resolvedValue = (this.actionEngine as any).resolveValue(value);
+    Logger.info(`Asserting order containing "${resolvedValue}" is visible`);
+    const locator = this.getPage().locator(`tr:has-text("${resolvedValue}"), [data-testid*="card"]:has-text("${resolvedValue}"), [data-testid*="order"]:has-text("${resolvedValue}")`).first();
+    await expect(locator).toBeVisible({ timeout: 15000 });
+  }
+);
+
+// Click a specific element (button/link) within an order row/card containing the order ID
+// Usage: I click 'TeleCRM.CRMReview' in order containing '$$OrderId'
+When(
+  /^I click ['"]([^'"]+)['"] in order containing ['"]([^'"]+)['"]$/,
+  async function (this: CustomWorld, elementRef: string, value: string) {
+    const resolvedValue = (this.actionEngine as any).resolveValue(value);
+    Logger.info(`Clicking "${elementRef}" in order containing: "${resolvedValue}"`);
+    const { ElementResolver } = require('../core/ElementResolver');
+    const isDotReference = /^[A-Z][A-Za-z0-9\-]+\.[A-Za-z0-9.]+$/.test(elementRef);
+    const rawLocator = isDotReference ? ElementResolver.resolve(elementRef) : elementRef;
+
+    // Find the order row/card containing the order ID
+    const orderContainer = this.getPage().locator(`tr:has-text("${resolvedValue}"), [data-testid*="card"]:has-text("${resolvedValue}"), [data-testid*="order"]:has-text("${resolvedValue}")`).first();
+    await expect(orderContainer).toBeVisible({ timeout: 15000 });
+
+    // Click the target element within that container
+    let targetLocator;
+    if (rawLocator.startsWith('//') || rawLocator.startsWith('(//')) {
+      // Convert absolute XPath to relative (prefix with .)
+      const relativeXpath = rawLocator.startsWith('(//') 
+        ? rawLocator.replace('(//', '(.//') 
+        : '.' + rawLocator;
+      targetLocator = orderContainer.locator(`xpath=${relativeXpath}`);
+    } else {
+      targetLocator = orderContainer.locator(rawLocator);
+    }
+    await targetLocator.first().scrollIntoViewIfNeeded();
+    await targetLocator.first().click();
   }
 );

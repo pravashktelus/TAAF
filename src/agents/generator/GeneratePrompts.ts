@@ -39,6 +39,8 @@ When I enter '<value>' into '<Page.Element>'
 When I type '<value>' into '<Page.Element>'
 When I select '<Option>' from '<Page.Element>'
 When I select '<Option>' from dropdown '<Page.Element>'
+# IMPORTANT: Use 'from' (without 'dropdown') for native <select> elements (Select* keys)
+# Use 'from dropdown' ONLY for custom combobox/dropdown components (non-native)
 When I check '<Page.Element>'
 When I hover over '<Page.Element>'
 When I scroll to '<Page.Element>'
@@ -67,13 +69,17 @@ Then the page title should be '<title>'
 Then I attach '<varName>' to the report as '<Label>'
 
 ## Data Syntax
-- Random data: ##FullName, ##Email, ##MobileNum, ##Password, ##Address, ##PhoneNum
+- Random data: ##FullName, ##Email, ##MobileNum, ##Password, ##Address, ##PhoneNum, ##FirstName, ##LastName, ##DOB, ##Username, ##Company
 - Scenario variables: {variableName}  (set earlier in same scenario)
 - Cross-scenario variables: $$variableName  (persisted across scenarios)
 
+IMPORTANT: When Test Data says ##FieldName, use it LITERALLY as the value in the step (the framework resolves it at runtime to a random value via Faker.js).
+  CORRECT: When I enter '##FullName' into 'Page.InputName'
+  WRONG:   When I enter 'random name' into 'Page.InputName'
+
 ## Element Reference Format
 Always use: 'PageName.ElementKey'
-Example: 'CustomerSupport.BtnSubmit', 'TeleConnect.LoginEmail'
+Example: 'CustomerSupport.BtnSubmit', 'MyPage.InputEmail'
 `;
 
   // ─── Feature File Conventions ─────────────────────────────────────────────
@@ -133,9 +139,10 @@ Feature: <PageName> - <Short Description>
     sections.push(this.CONVENTIONS);
 
     // Element references — CRITICAL section
-    sections.push('\n## CRITICAL: Available Element References');
+    sections.push('\n## CRITICAL: Available Element References (CASE-EXACT from live DOM)');
     sections.push('You MUST use ONLY these exact element references. NEVER invent page names like LoginPage, OrdersPage, SupportPage.');
     sections.push('NEVER use Support.ElementKey as a placeholder — use the REAL refs listed below.');
+    sections.push('Element keys and locators are case-sensitive — do NOT change their casing.');
     sections.push(`For any element genuinely NOT listed here, use '${plan.page}.ElementKey' — the locator will need to be added to .properties separately.\n`);
 
     if (elementRefs.size > 0) {
@@ -160,7 +167,7 @@ Feature: <PageName> - <Short Description>
       sections.push(`- Navigation → use CustomerSupport.NavOrders, CustomerSupport.BtnViewDetails etc.`);
       sections.push(`- New elements not in list → use '${plan.page}.ElementKey' (must exist in .properties file)`);
     } else {
-      sections.push(`  WARNING: No existing elements found. Use '${plan.page}.ElementKey' refs — locators must be added to .properties via Playwright MCP or --url crawl.`);
+      sections.push(`  WARNING: No existing elements found. Use '${plan.page}.ElementKey' refs — locators must be added to .properties via --url crawl.`);
     }
 
     // Explicit page naming rule
@@ -240,50 +247,137 @@ Convert ALL ${plan.testCases.length} test cases above into a single .feature fil
     tc: PlanTestCase,
     pageName: string,
     availableElements: string[],
+    testData?: Record<string, string>,
   ): string {
     // Read actual step patterns from the framework's step definition files
     const realStepPatterns = StepPatternExtractor.getWebStepPatterns();
 
-    return `Convert this test case into Gherkin steps.
+    // Filter available elements to only show current page's elements prominently
+    const currentPageElements = availableElements.filter((e) => e.trim().includes(`'${pageName}.`));
+    const otherElements = availableElements.filter((e) => !e.trim().includes(`'${pageName}.`));
+
+    const isNegativeCase = tc.type === 'negative' || tc.type === 'edge_case';
+
+    let prompt = `Convert this test case into Gherkin steps.
 
 ## Test Case
 Title: ${tc.title}
+Type: ${tc.type}
 Steps:
 ${tc.steps.map((s) => `- Action: ${s.action}${s.testData ? ` | Data: ${s.testData}` : ''}${s.expected ? ` | Expected: ${s.expected}` : ''}`).join('\n')}
 
-## Available Elements (use ONLY these — do NOT invent new ones)
-${availableElements.join('\n')}
+## Available Elements for '${pageName}' page (USE THESE — from actual live DOM, locators are CASE-EXACT)
+${currentPageElements.join('\n')}
+
+${otherElements.length > 0 ? `## Other available elements (use ONLY if ${pageName} doesn't have what you need)\n${otherElements.join('\n')}` : ''}
 
 ## Step Patterns from Framework (use ONLY these — they are the actual implemented steps)
 ${realStepPatterns}
 
 ## Data Syntax
-- Random data: ##FullName, ##Email, ##Password, ##MobileNum, ##Address
-- Cross-scenario variables: $$variableName
+- Random data: ##FullName, ##Email, ##MobileNum, ##Password, ##Address, ##PhoneNum, ##FirstName, ##LastName
+- Cross-scenario variables: $$variableName (resolved from testdata/runtime-store.json)
 - Scenario variables: {variableName}
 
-## CRITICAL Rules
-- Output ONLY Gherkin steps (no Feature/Scenario headers, no comments, no explanation)
-- One step per line, starting with When/Then/And
-- Use ONLY elements from the "Available Elements" list — do NOT invent page names or element keys
-- Use ONLY step patterns from the "Step Patterns from Framework" list — do NOT invent new step patterns
-- For multi-field forms (name, email, password, review), generate separate enter steps for EACH field
-- Include assertion steps (Then) for each expected result
-- If an element is not in the list, use '${pageName}.ElementKey' format with a descriptive key name
-- Every click/enter/assert MUST use 'PageName.ElementKey' format — NEVER plain text like 'Sign In' or 'My Orders'
+CRITICAL: When Test Data specifies ##FieldName (e.g., ##FullName, ##Email), use the ## token LITERALLY in the step:
+  CORRECT: When I enter '##FullName' into 'Page.InputName'
+  CORRECT: When I enter '##Email' into 'Page.InputEmail'
+  WRONG:   When I enter 'John Doe' into 'Page.InputName'
+  WRONG:   When I enter 'test@email.com' into 'Page.InputEmail'
+The framework resolves ## tokens at runtime into random values (Faker.js).
 
-## Examples of CORRECT step format
-- When I click 'TeleConnect.LoginSubmit'
-- When I enter '$$Email' into 'TeleConnect.LoginEmail'
-- Then 'TeleConnect.NavOrders' should be visible
-- Then the url should contain '/customer/orders'
-- When I click 'TeleConnect.NavOrders'
-- Then 'OrderHistory.OrderCard' should be visible
+## DATA SELECTION — when a step uses GENERAL terms (e.g., "Enter a city", "Select a Country"), CHOOSE the value:
+DYNAMIC (random, unique per run) → use ## tokens:
+  - Name/First/Last → ##FullName / ##FirstName / ##LastName
+  - Email → ##Email     Username → ##Username     Password → ##Password
+  - Phone/Mobile → ##MobileNum     Company → ##Company     Street Address → ##Address
+STATIC (fixed literal, NEVER randomize — must match dropdown options / valid formats):
+  - City → 'Bangalore'     State → 'Karnataka'     Country → 'India'
+  - Zipcode → '560001'     DOB → Day '15' / Month 'May' / Year '1990'
+  - Gender → 'Male'     Title → 'Mr.'     ID Type → 'Aadhaar'     ID Number → '123456789012'
+RULE: Fields that must be unique (email, name, phone) get ##tokens. Fixed-choice/dropdown/format fields get literals.
+Example: "Enter a city into the City field" → When I enter 'Bangalore' into 'Page.InputCity'
+Example: "Enter an email into the Email field" → When I enter '##Email' into 'Page.InputEmail'
+Example: "Select a Country from the Country dropdown" → When I select 'India' from 'Page.SelectCountry'
 
-## Examples of WRONG format (NEVER do this)
-- When I click 'Sign In'  ← WRONG: must be 'Page.Element' not plain text
-- Given I am on the page 'TeleConnect.NavOrders' ← WRONG: not a valid step
-- Then 'Support & Issues' should be visible ← WRONG: must be 'Page.Element' not text`;
+${testData && Object.keys(testData).length > 0 ? `## Test Data from Story
+${Object.entries(testData).map(([k, v]) => `- ${k}: ${v}`).join('\n')}` : ''}
+
+## RULES (MUST FOLLOW)
+1. Output ONLY Gherkin steps — no Feature/Scenario headers, no comments, no explanation
+2. One step per line starting with Given/When/Then/And
+3. EVERY element ref MUST be 'PageName.ElementKey' format — NEVER plain text
+4. ONLY use elements from the "Available Elements" list above
+5. ONLY use step patterns from the "Step Patterns from Framework" list above
+6. If a step requires an element not in the list, use the CLOSEST available element that makes sense:
+   - "Verify Dashboard heading" → use NavDashboard (it has text 'Dashboard') with 'should be visible'
+   - "Verify user name shown" → use any Nav element with 'should contain text' and the expected name
+   - "Verify Quick Launch visible" → use any visible element from that section
+   - "Verify Assign Leave button" → use NavLeave with 'should be visible' (closest match)
+   - NEVER output # FLAG: comments — always produce a working step using available elements
+7. NEVER use 'should have value' assertions after entering data — they are redundant
+8. NEVER expose credentials in assertion steps (use $$variableName references)
+9. Strings in steps must have proper opening AND closing quotes: 'value' not just '
+10. Be CREATIVE with available elements — a Nav link named 'Dashboard' CAN verify the dashboard page is visible
+11. For negative tests: ALWAYS end with 'Then the url should contain' to prove the action failed
+
+## Element Matching Guide
+- Navigation link → 'Nav*' keys (NavNavSignIn, NavDashboard, NavDirectory)
+- Text input → 'Input*' keys (InputUsername, InputEmail, InputPassword)
+- Button → 'Btn*' keys (BtnLogin, BtnRegisterSubmit, BtnSearchSubmit)
+- Dropdown → 'Select*' keys (SelectCountry) — use: When I select 'X' from 'Page.Select*'
+- Error messages → 'Error*' keys if available
+
+## Correct Step Examples
+- Given I navigate to the application
+- When I click '${pageName}.NavNavSignIn'
+- When I enter 'value' into '${pageName}.InputUsername'
+- When I enter '$$password' into '${pageName}.InputPassword'
+- When I click '${pageName}.BtnLogin'
+- Then the url should contain '/dashboard'
+- Then '${pageName}.NavDashboard' should be visible
+- Then '${pageName}.NavDashboard' should have text 'Dashboard'
+- Then '${pageName}.NavDashboard' should contain text 'Dashboard'`;
+
+    // Add negative/edge case specific instructions
+    if (isNegativeCase) {
+      prompt += `
+
+## NEGATIVE/EDGE CASE SPECIFIC RULES
+This is a ${tc.type} test case. Follow these rules:
+
+### For empty field testing (e.g., "Login with empty username"):
+- Do NOT enter any value for that field — skip the enter step entirely
+- Then click submit and verify login failed (still on login page)
+- CORRECT pattern:
+  Given I navigate to the application
+  When I enter 'wrongpassword' into '${pageName}.InputPassword'
+  When I click '${pageName}.BtnLogin'
+  Then the url should contain '/auth/login'
+
+### For invalid/wrong credential testing:
+- Enter clearly WRONG values — NOT $$username or $$password (those are the real credentials)
+- Use fake values like 'invaliduser', 'wrongpass123', 'x', 'test@fake.com'
+- CORRECT:
+  When I enter 'invaliduser' into '${pageName}.InputUsername'
+  When I enter 'wrongpassword' into '${pageName}.InputPassword'
+  When I click '${pageName}.BtnLogin'
+  Then the url should contain '/auth/login'
+
+### For assertion after failed action:
+- BEST: Verify still on same page: Then the url should contain '/auth/login'
+- This works because if login fails, URL does NOT change to /dashboard
+- Only use error element assertions if an 'Error*' element exists in available elements list
+
+### CRITICAL for negative scenarios:
+- NEVER use $$username or $$password — those are VALID credentials (for happy path only)
+- NEVER use empty quotes '' — skip the enter step instead
+- NEVER use 'should have value' assertions
+- Each scenario MUST differ from happy path — enter WRONG data, not the same data
+- ALWAYS end with an assertion that proves the negative condition (url still contains login page)`;
+    }
+
+    return prompt;
   }
 
   /**
@@ -449,8 +543,8 @@ ${realApiPatterns}
       const fieldHint = this._extractFieldTarget(step.action);
       const ref = this._findByRole(elementRefs, 'select', fieldHint);
       const value = this._extractSimpleValue(step);
-      if (ref) results.push(`When I select '${value}' from dropdown '${ref}'`);
-      else results.push(`When I select '${value}' from dropdown '${pageName}.Select${this._capitalize(fieldHint)}'`);
+      if (ref) results.push(`When I select '${value}' from '${ref}'`);
+      else results.push(`When I select '${value}' from '${pageName}.Select${this._capitalize(fieldHint)}'`);
       return results;
     }
 

@@ -1,0 +1,245 @@
+name: AI BDD Agent Pipeline
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Trigger: any push to a NON-main branch that changes files under requirements/
+# (user stories or test cases). The pipeline then runs:
+#   1. plan        → Planner produces plan .md/.json                (artifact)
+#   2. gate + generate → [human approves plan] → Generator makes .feature/.properties (artifact)
+#   3. gate + execute  → [human approves feature] → run tests + report (artifact)
+#   4. gate + merge    → [human approves report] → merge branch into main
+#
+# The three human gates use GitHub Environments with REQUIRED REVIEWERS.
+# See docs/CI-CD-Agent-Pipeline.md for the one-time setup (environments + secrets).
+# ─────────────────────────────────────────────────────────────────────────────
+
+on:
+  push:
+    branches-ignore:
+      - main
+    paths:
+      - 'requirements/**'
+
+# Only one pipeline per branch at a time; a newer push cancels an in-flight run.
+concurrency:
+  group: agent-pipeline-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write   # needed for the final merge-to-main step
+
+env:
+  NODE_VERSION: '20'
+  # App under test + AI provider come from secrets/vars (see setup doc).
+  OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+
+jobs:
+  # ───────────────────────────────────────────────────────────────────────────
+  # JOB 1 — PLAN: detect the changed requirement, run the Planner.
+  # ───────────────────────────────────────────────────────────────────────────
+  plan:
+    name: 1 - Plan (Planner Agent)
+    runs-on: ubuntu-latest
+    outputs:
+      story_file: ${{ steps.detect.outputs.story_file }}
+      plan_json: ${{ steps.runplan.outputs.plan_json }}
+      plan_md: ${{ steps.runplan.outputs.plan_md }}
+    steps:
+      - name: Checkout (full history for diff + merge)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      # The dev app source repo is cloned so the agents can scan it for locators
+      # and validation messages (source-repo integration). Uses a token secret.
+      - name: Clone dev app source repo
+        run: |
+          git clone --depth 1 \
+            https://x-access-token:${{ secrets.DEVREPO_TOKEN }}@github.com/AshishVats-Telus/TeleCom_Application.git \
+            .devrepo/TeleCom_Application || echo "Dev repo clone failed — continuing (source scan will be skipped)"
+
+      - name: Detect changed requirement file
+        id: detect
+        run: |
+          # Find requirement files changed in this push (added/modified).
+          CHANGED=$(git diff --name-only ${{ github.event.before }} ${{ github.sha }} -- 'requirements/**' \
+            | grep -E '\.(md|xlsx|xls|docx)$' | head -n 1 || true)
+          if [ -z "$CHANGED" ]; then
+            # Fallback: newest file under requirements/stories
+            CHANGED=$(ls -t requirements/stories/*.md 2>/dev/null | head -n 1 || true)
+          fi
+          if [ -z "$CHANGED" ]; then
+            echo "No changed requirement file found." >&2
+            exit 1
+          fi
+          echo "Detected requirement: $CHANGED"
+          echo "story_file=$CHANGED" >> "$GITHUB_OUTPUT"
+
+      - name: Run Planner Agent
+        id: runplan
+        run: |
+          set -e
+          npm run agent:plan -- --story "${{ steps.detect.outputs.story_file }}"
+          # Resolve the produced plan artifacts (Planner names them dynamically).
+          PLAN_JSON=$(ls -t generated/plans/*.json | head -n 1)
+          PLAN_MD=$(ls -t generated/plans/*.md | head -n 1)
+          echo "plan_json=$PLAN_JSON" >> "$GITHUB_OUTPUT"
+          echo "plan_md=$PLAN_MD" >> "$GITHUB_OUTPUT"
+          echo "::notice title=Plan generated::Review the plan at $PLAN_MD then approve the 'generate' job."
+
+      - name: Upload plan artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: plan
+          path: |
+            generated/plans/
+          retention-days: 14
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # JOB 2 — GENERATE: waits for human approval of the PLAN (environment gate),
+  # then runs the Generator WITHOUT --apply (review copy in generated/features/).
+  # ───────────────────────────────────────────────────────────────────────────
+  generate:
+    name: 2 - Generate (after plan approval)
+    needs: plan
+    runs-on: ubuntu-latest
+    # ⛔ This job pauses here until a required reviewer approves in the Actions UI.
+    environment: plan-review
+    outputs:
+      feature_file: ${{ steps.rungen.outputs.feature_file }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - run: npm ci
+
+      - name: Clone dev app source repo
+        run: |
+          git clone --depth 1 \
+            https://x-access-token:${{ secrets.DEVREPO_TOKEN }}@github.com/AshishVats-Telus/TeleCom_Application.git \
+            .devrepo/TeleCom_Application || echo "Dev repo clone failed — continuing"
+
+      - name: Download approved plan
+        uses: actions/download-artifact@v4
+        with:
+          name: plan
+          path: generated/plans
+
+      - name: Run Generator Agent (no --apply — review copy)
+        id: rungen
+        run: |
+          set -e
+          npm run agent:generate -- --plan "${{ needs.plan.outputs.plan_json }}" \
+            --url "${{ vars.APP_URL }}"
+          FEATURE=$(ls -t generated/features/*.feature | head -n 1)
+          echo "feature_file=$FEATURE" >> "$GITHUB_OUTPUT"
+          echo "::notice title=Feature generated::Review $FEATURE and the .properties, then approve the 'execute' job."
+
+      - name: Upload generated feature + properties
+        uses: actions/upload-artifact@v4
+        with:
+          name: generated-feature
+          path: |
+            generated/features/
+            src/pages/properties/
+          retention-days: 14
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # JOB 3 — EXECUTE: waits for human approval of the FEATURE (environment gate),
+  # applies the feature to features/web/, runs the tests, produces a report.
+  # ───────────────────────────────────────────────────────────────────────────
+  execute:
+    name: 3 - Execute tests (after feature approval)
+    needs: [plan, generate]
+    runs-on: ubuntu-latest
+    # ⛔ Pauses until a required reviewer approves the generated feature.
+    environment: feature-review
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Download approved plan + feature
+        uses: actions/download-artifact@v4
+        with:
+          name: generated-feature
+          path: .
+
+      - name: Apply feature to features/web/ (Generator --apply)
+        run: |
+          # Re-run Generator with --apply to promote the reviewed feature into
+          # features/web/ (source/registry cover locators; no crawl needed).
+          npm run agent:generate -- --plan "${{ needs.plan.outputs.plan_json }}" --apply || true
+          # If the plan artifact isn't present, fall back to copying the reviewed feature.
+          if [ -d generated/features ]; then
+            mkdir -p features/web
+            cp -f generated/features/*.feature features/web/ 2>/dev/null || true
+          fi
+
+      - name: Run tests + generate report
+        env:
+          APP_URL: ${{ vars.APP_URL }}
+        run: |
+          # Headless in CI.
+          npm test || true          # don't fail the job on test failures — human reviews the report
+          npm run report || true
+
+      - name: Upload test report
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-report
+          path: |
+            reports/html/
+            reports/cucumber-json/
+          retention-days: 14
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # JOB 4 — MERGE: waits for human approval of the REPORT (environment gate),
+  # then merges this feature branch into main.
+  # ───────────────────────────────────────────────────────────────────────────
+  merge:
+    name: 4 - Merge to main (after report approval)
+    needs: [plan, generate, execute]
+    runs-on: ubuntu-latest
+    # ⛔ Pauses until a required reviewer approves the test report.
+    environment: execution-review
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Merge feature branch into main
+        run: |
+          set -e
+          BRANCH="${GITHUB_REF_NAME}"
+          git config user.name  "agent-pipeline[bot]"
+          git config user.email "agent-pipeline@users.noreply.github.com"
+          git fetch origin main
+          git checkout main
+          git merge --no-ff "origin/${BRANCH}" -m "Merge approved AI-generated tests from ${BRANCH}"
+          git push origin main
+          echo "::notice title=Merged::Branch ${BRANCH} merged into main."

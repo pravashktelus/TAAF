@@ -225,6 +225,11 @@ export class PageCrawler {
       throw new Error('[PageCrawler] Browser not launched. Call launch() first.');
     }
 
+    // Wait for dynamic frameworks (Vue, React, Angular) to finish hydration/rendering
+    // This prevents capturing stale or partially-rendered DOM attributes
+    await this.page.waitForLoadState('networkidle').catch(() => {});
+    await this.page.waitForTimeout(500);
+
     const url = this.page.url();
     const title = await this.page.title();
     const elements = await this._extractElements();
@@ -260,7 +265,11 @@ export class PageCrawler {
             || (el as HTMLInputElement).placeholder
             || el.textContent?.trim().substring(0, 50) || '';
           
-          const node: any = { role, name, children: [] };
+          // Capture exact placeholder value (DOM property) for locator generation
+          // This preserves original casing regardless of HTML source vs DOM property differences
+          const placeholder = (el as HTMLInputElement).placeholder || '';
+          
+          const node: any = { role, name, placeholder, children: [] };
           parent.children.push(node);
           
           for (const child of Array.from(el.children)) {
@@ -336,13 +345,18 @@ export class PageCrawler {
         else if (role === 'link' || role === 'menuitem') elementType = 'link';
         else if (role === 'checkbox' || role === 'radio') elementType = 'input';
 
-        // Build locator — prefer role + name (what Playwright actually uses)
+        // Build locator — prefer placeholder= for input fields (framework standard),
+        // then role + name for other interactive elements
         let locator = '';
         if (name && name.length > 1) {
           if (role === 'generic' || role === 'group') {
             // Generic/group elements use text= locator (no proper role for getByRole)
             locator = `text=${name}`;
             elementType = 'button'; // treat clickable generics as buttons
+          } else if ((role === 'textbox' || role === 'searchbox') && node.placeholder) {
+            // For input fields with a placeholder, use placeholder= locator with exact DOM casing
+            // This is the framework's preferred format for inputs and avoids casing issues
+            locator = `placeholder=${node.placeholder}`;
           } else {
             locator = `role=${role}[name='${name.replace(/'/g, "\\'")}']`;
           }
@@ -485,25 +499,35 @@ export class PageCrawler {
         const testId = el.getAttribute('data-testid') || '';
         const dataQa = el.getAttribute('data-qa') || '';
         const dataCy = el.getAttribute('data-cy') || '';
-        const placeholder = el.getAttribute('placeholder') || '';
+        // Use DOM property .placeholder (not getAttribute) — property always reflects current rendered state
+        // getAttribute reads raw HTML source which may differ in casing for SPAs (Vue, React, Angular)
+        const placeholder = (htmlEl as HTMLInputElement).placeholder || '';
         const ariaLabel = el.getAttribute('aria-label') || '';
         const value = (htmlEl as HTMLInputElement).value || '';
         const href = el.getAttribute('href') || '';
         const visibleText = (htmlEl.textContent || '').trim().substring(0, 40);
         const role = el.getAttribute('role') || '';
 
-        // Determine key source
-        const keySource = testId || dataQa || dataCy || id || name || ariaLabel || placeholder || value || visibleText;
+        // Determine key source — prefer placeholder over name for display/key generation
+        // (name attribute is often a machine identifier like "username", while placeholder is user-facing)
+        const keySource = testId || dataQa || dataCy || id || ariaLabel || placeholder || name || value || visibleText;
         if (!keySource || keySource.length < 2) return;
 
-        // Build locator
+        // Build locator — priority order matches framework conventions:
+        // 1. data-testid (most stable)
+        // 2. data-qa / data-cy
+        // 3. Unique ID
+        // 4. placeholder (preferred for form inputs in this framework)
+        // 5. name attribute (XPath fallback)
+        // 6. aria-label → role locator
+        // 7. text content (last resort)
         let locator = '';
         if (testId) locator = `//${tag}[@data-testid='${testId}']`;
         else if (dataQa) locator = `//${tag}[@data-qa='${dataQa}']`;
         else if (dataCy) locator = `//${tag}[@data-cy='${dataCy}']`;
         else if (id) locator = `#${id}`;
+        else if (placeholder && isFormElement) locator = `placeholder=${placeholder}`;
         else if (name && isFormElement) locator = `//${tag}[@name='${name}']`;
-        else if (placeholder) locator = `placeholder=${placeholder}`;
         else if (inputType === 'submit' && value) locator = `//input[@value='${value}']`;
         else if (ariaLabel) locator = `role=${role || tag}[name='${ariaLabel}']`;
         else if (visibleText && visibleText.length > 1 && visibleText.length < 40) locator = `text=${visibleText}`;
@@ -527,7 +551,7 @@ export class PageCrawler {
         else if (elementType === 'select') prefix = 'Select';
         else if (elementType === 'link') prefix = 'Nav';
 
-        const sanitized = (name || id || ariaLabel || placeholder || value || visibleText).replace(/[^a-zA-Z0-9\s]/g, '').trim();
+        const sanitized = (ariaLabel || placeholder || name || id || value || visibleText).replace(/[^a-zA-Z0-9\s]/g, '').trim();
         const words = sanitized.split(/[\s-_]+/).slice(0, 4).map((w: string) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase());
         const key = prefix + words.join('');
 
@@ -706,22 +730,29 @@ export class PageCrawler {
    * e.g. "Click NavOrders" → "NavOrders"
    */
   private _extractElementHint(action: string): string {
-    // Pattern: "Enter X into ELEMENT" or "Click ELEMENT" or "Select X from ELEMENT"
-    const intoMatch = action.match(/into\s+['"]?([A-Za-z_]+)['"]?\s*$/i);
+    // Pattern 1: Quoted field names — "Name", 'Email Address', "Password" etc.
+    // This handles: 'Enter value into the "Name" field', 'Click the "Signup" button'
+    const quotedMatch = action.match(/["']([^"']+)["']/);
+    if (quotedMatch) return quotedMatch[1];
+
+    // Pattern 2: "Enter X into ELEMENT" (unquoted element name at end)
+    const intoMatch = action.match(/into\s+(?:the\s+)?([A-Za-z_]+)\s*$/i);
     if (intoMatch) return intoMatch[1];
 
-    const fromMatch = action.match(/from\s+['"]?([A-Za-z_]+)['"]?\s*$/i);
+    // Pattern 3: "Select X from ELEMENT"
+    const fromMatch = action.match(/from\s+(?:the\s+)?([A-Za-z_]+)\s*$/i);
     if (fromMatch) return fromMatch[1];
 
-    const clickMatch = action.match(/(?:click|press|submit)\s+['"]?([A-Za-z_]+)['"]?\s*$/i);
+    // Pattern 4: "Click ELEMENT" / "Click on ELEMENT" / "Click the ELEMENT button/link"
+    const clickMatch = action.match(/(?:click|press|submit)\s+(?:on\s+)?(?:the\s+)?['"]?([A-Za-z][A-Za-z\s]*[A-Za-z])['"]?(?:\s+(?:button|link|checkbox|radio))?\s*$/i);
     if (clickMatch) return clickMatch[1];
 
-    // Fallback: find any PascalCase word (likely element name)
+    // Pattern 5: PascalCase word (likely element name)
     const pascalMatch = action.match(/([A-Z][a-z]+[A-Z][a-zA-Z]*)/);
     if (pascalMatch) return pascalMatch[1];
 
-    // Last resort: last word
-    const words = action.trim().split(/\s+/);
+    // Last resort: last meaningful word
+    const words = action.trim().replace(/[()[\]]/g, '').split(/\s+/);
     return words[words.length - 1];
   }
 
@@ -975,7 +1006,7 @@ export class PageCrawler {
     }
 
     if (snapshot.elements.length > 0) {
-      lines.push('Interactive Elements:');
+      lines.push('Interactive Elements (locators are CASE-EXACT from live DOM — use verbatim):');
       snapshot.elements.forEach((el) => {
         lines.push(`  [${el.type}] Key: ${el.key} | Locator: ${el.locator} | Label: "${el.label}"`);
       });

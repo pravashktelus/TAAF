@@ -23,8 +23,9 @@ default:
   #tags: "@teleconnect_install"
   #tags: "@teleconnect_homepage"
   #tags: "@teleconnect_activate"
-  tags: "@register-user-api or @teleconnect_registered-user"
+  #tags: "@register-user-api or @teleconnect_registered-user"
   #tags: "@customersupport_web"
+  tags: "@teleconnect_web and @e2e"
   #tags: "@teleconnect_orderingestion or @teleconnect_crm or @teleconnect_install or @teleconnect_activate or @teleconnect_verify"
   format:
     - progress-bar

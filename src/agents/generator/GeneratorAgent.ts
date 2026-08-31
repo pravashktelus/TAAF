@@ -2,9 +2,11 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { AgentsConfig } from '../config/AgentsConfig';
 import { LLMClient } from '../core/LLMClient';
+import { PlaywrightCrawler } from '../core/PlaywrightCrawler';
 import { PageCrawler, PageSnapshot, DiscoveredElement } from '../core/PageCrawler';
 import { PropertiesRegistry } from '../core/PropertiesRegistry';
 import { ContextEnricher } from '../core/ContextEnricher';
+import { SourceIndexProvider } from '../core/SourceIndexProvider';
 import { OutputValidator } from '../core/OutputValidator';
 import { PropertiesWriter } from './PropertiesWriter';
 import { FeatureWriter } from './FeatureWriter';
@@ -22,8 +24,11 @@ import { TestPlan } from '../planner/PlanFormatter';
  *   5. Write review copy to generated/features/ (or directly to features/web/ with --apply)
  *
  * Usage:
- *   # Minimal — no URL needed
+ *   # Single plan — no URL needed
  *   npm run agent:generate -- --plan generated/plans/Support-plan_from_Story1.json
+ *
+ *   # Multiple plans (processed sequentially)
+ *   npm run agent:generate -- --plan generated/plans/Plan1.json --plan generated/plans/Plan2.json
  *
  *   # Single URL
  *   npm run agent:generate -- --plan generated/plans/Support-plan_from_Story1.json --url https://app.com/support
@@ -41,34 +46,36 @@ import { TestPlan } from '../planner/PlanFormatter';
 // ─── Args Interface ───────────────────────────────────────────────────────────
 
 interface GeneratorArgs {
-  plan: string;
+  plans: string[];
   url?: string;
   urls?: string[];
   targetUrl?: string;
   login: boolean;
   apply: boolean;
+  forceCrawl: boolean;
 }
 
 // ─── Parse CLI Arguments ──────────────────────────────────────────────────────
 
 function parseArgs(): GeneratorArgs {
   const args = process.argv.slice(2);
-  const result: GeneratorArgs = { plan: '', login: false, apply: false };
+  const result: GeneratorArgs = { plans: [], login: false, apply: false, forceCrawl: false };
 
   for (let i = 0; i < args.length; i++) {
     switch (args[i]) {
-      case '--plan':        result.plan = args[++i]; break;
+      case '--plan':        result.plans.push(args[++i]); break;
       case '--url':         result.url = args[++i]; break;
       case '--urls':        result.urls = args[++i].split(',').map((u) => u.trim()); break;
       case '--target-url':  result.targetUrl = args[++i]; break;
       case '--login':       result.login = true; break;
       case '--apply':       result.apply = true; break;
+      case '--force-crawl': result.forceCrawl = true; break;
     }
   }
 
-  if (!result.plan) {
-    console.error('[GeneratorAgent] ERROR: --plan is required.');
-    console.error('Usage: npm run agent:generate -- --plan generated/plans/{Page}-plan_from_{source}.json');
+  if (result.plans.length === 0) {
+    console.error('[GeneratorAgent] ERROR: --plan is required (one or more).');
+    console.error('Usage: npm run agent:generate -- --plan plan1.json --plan plan2.json');
     process.exit(1);
   }
 
@@ -138,7 +145,16 @@ function _detectUnresolvedElements(
     const existingElements = registry.getPageElements(pageName);
     const exists = existingElements.some((el) => el.elementKey === key);
     if (!exists) {
-      unresolved.push(key);
+      // Also check if it was written in the current run (.properties file on disk)
+      const propsPath = path.resolve(process.cwd(), 'src', 'pages', 'properties', `${pageName}.properties`);
+      let existsOnDisk = false;
+      if (fs.existsSync(propsPath)) {
+        const content = fs.readFileSync(propsPath, 'utf-8');
+        existsOnDisk = content.split('\n').some((l) => l.startsWith(`${key}=`) && l.split('=')[1]?.trim().length > 0);
+      }
+      if (!existsOnDisk) {
+        unresolved.push(key);
+      }
     }
   }
 
@@ -156,6 +172,111 @@ async function run(): Promise<void> {
   }
 
   const args = parseArgs();
+
+  // If multiple plans provided, process each sequentially
+  if (args.plans.length > 1) {
+    console.log('═══════════════════════════════════════════');
+    console.log('  Generator Agent — Batch Mode');
+    console.log(`  Processing ${args.plans.length} plans sequentially`);
+    console.log('═══════════════════════════════════════════\n');
+
+    const results: { plan: string; featurePath: string; propsWritten: string[] }[] = [];
+
+    for (let i = 0; i < args.plans.length; i++) {
+      const planFile = args.plans[i];
+      console.log(`\n┌─── Plan ${i + 1}/${args.plans.length}: ${planFile} ───┐\n`);
+
+      try {
+        const result = await runSingleGeneration({
+          plan: planFile,
+          url: args.url,
+          urls: args.urls,
+          targetUrl: args.targetUrl,
+          login: args.login,
+          apply: args.apply,
+          forceCrawl: args.forceCrawl,
+        });
+        results.push({ plan: planFile, ...result });
+        console.log(`└─── Plan ${i + 1} complete ───┘\n`);
+      } catch (err) {
+        console.error(`[GeneratorAgent] ❌ Failed processing plan: ${planFile}`);
+        console.error(`  Error: ${err}`);
+        console.log(`└─── Plan ${i + 1} FAILED ───┘\n`);
+      }
+    }
+
+    // Summary
+    console.log('\n═══════════════════════════════════════════');
+    console.log('  Generator Agent — Batch Complete');
+    console.log('═══════════════════════════════════════════');
+    console.log(`  Processed: ${results.length}/${args.plans.length} plans`);
+    results.forEach((r, i) => {
+      console.log(`\n  [${i + 1}] ${r.plan}`);
+      console.log(`      Feature: ${r.featurePath}`);
+      if (r.propsWritten.length > 0) {
+        r.propsWritten.forEach((p) => console.log(`      Props:   ${p}`));
+      }
+    });
+    if (!args.apply) {
+      console.log('\n  Review generated/features/ then apply:');
+      const planFlags = args.plans.map((p) => `--plan "${p}"`).join(' ');
+      console.log(`  npm run agent:generate -- ${planFlags} --apply`);
+    } else {
+      console.log('\n  All applied to features/web/ — run: npm test');
+    }
+    console.log('═══════════════════════════════════════════\n');
+    return;
+  }
+
+  // Single plan — original flow
+  const result = await runSingleGeneration({
+    plan: args.plans[0],
+    url: args.url,
+    urls: args.urls,
+    targetUrl: args.targetUrl,
+    login: args.login,
+    apply: args.apply,
+    forceCrawl: args.forceCrawl,
+  });
+
+  // Done output for single plan
+  console.log('\n═══════════════════════════════════════════');
+  console.log('  Generator Agent — Complete');
+  console.log('═══════════════════════════════════════════');
+
+  if (result.propsWritten.length > 0) {
+    console.log('  Properties files:');
+    result.propsWritten.forEach((p) => console.log(`    ${p}`));
+  } else {
+    console.log('  Properties: No new elements — all existing refs reused');
+  }
+
+  console.log(`  Feature file: ${result.featurePath}`);
+  console.log('');
+
+  if (!args.apply) {
+    console.log('  Review generated/features/ then apply:');
+    console.log(`  npm run agent:generate -- --plan ${args.plans[0]} --apply`);
+  } else {
+    console.log('  Applied to features/web/ — run: npm test');
+  }
+  console.log('═══════════════════════════════════════════\n');
+}
+
+// ─── Single Generation Execution ─────────────────────────────────────────────
+
+interface SingleGeneratorArgs {
+  plan: string;
+  url?: string;
+  urls?: string[];
+  targetUrl?: string;
+  login: boolean;
+  apply: boolean;
+  forceCrawl?: boolean;
+}
+
+async function runSingleGeneration(args: SingleGeneratorArgs): Promise<{ featurePath: string; propsWritten: string[] }> {
+  const config = AgentsConfig.getInstance();
 
   console.log('═══════════════════════════════════════════');
   console.log('  Generator Agent');
@@ -195,6 +316,45 @@ async function run(): Promise<void> {
       s.action.toLowerCase().includes('send a') && (s.action.toLowerCase().includes('request') || s.action.toLowerCase().includes('get') || s.action.toLowerCase().includes('post'))
     ));
 
+  // ── Guardrail: refuse to generate a WEB feature with NO real elements ──────
+  // Without a verified element set (from plan crawl, a curated .properties, or
+  // the source repo) the AI is forced to guess bindings — it force-fits every
+  // step onto whatever few refs it can find and invents assertions. This is the
+  // #1 cause of low-quality output (often triggered by a wrong --page name that
+  // doesn't match any .properties / source-repo page). Fail loud with guidance
+  // instead of silently emitting garbage.
+  if (!isApiStory) {
+    const planElementCount = (plan.elements || []).length;
+    // A crawl would supply elements — only guard when NO crawl source exists.
+    const willCrawl = !!(args.url || args.urls?.length || args.targetUrl ||
+      (plan.url && plan.url.startsWith('http')));
+    if (planElementCount === 0 && !willCrawl) {
+      const probe = new PropertiesRegistry();
+      probe.load();
+      const registryCount = probe.getPageElements(plan.page).length;
+      let sourceCount = 0;
+      try {
+        const sp = new SourceIndexProvider();
+        sourceCount = sp.isAvailable() ? sp.getLocatorsForPage(plan.page).length : 0;
+      } catch { /* source repo optional */ }
+
+      if (registryCount === 0 && sourceCount === 0) {
+        console.error('\n[GeneratorAgent] ✗ ABORTING: no verified UI elements available for this plan.');
+        console.error(`  Page name in plan: '${plan.page}'`);
+        console.error('  The plan has 0 crawled elements, no matching .properties file, and no');
+        console.error('  source-repo locators for this page. Generating now would force the AI to');
+        console.error('  guess element bindings and invent assertions.');
+        console.error('\n  Fix one of the following, then re-run:');
+        console.error(`    • Use the correct --page that matches an existing .properties file`);
+        console.error(`      (e.g. --page TeleConnect, not the story filename).`);
+        console.error(`    • Re-run the Generator with --url <appUrl> to crawl live elements.`);
+        console.error(`    • Ensure the source repo (agents.appRepo.path) covers page '${plan.page}'`);
+        console.error(`      via agents.appRepo.pageMap.`);
+        process.exit(1);
+      }
+    }
+  }
+
   // ── Step 2: Load properties registry ──────────────────────────────────────
   const registry = new PropertiesRegistry();
   if (!isApiStory) {
@@ -203,20 +363,56 @@ async function run(): Promise<void> {
   }
 
   // ── Step 3: Crawl live pages (if URLs provided) ────────────────────────────
-  // SKIP crawling entirely for API stories — no browser needed
+  // SKIP crawling if the plan already has elements from the Planner's crawl
+  // The Planner does a full step-replay crawl — no need to repeat it
 
   if (isApiStory) {
     console.log(`[GeneratorAgent] API story detected — skipping browser crawl (no UI elements needed)`);
   }
 
-  const crawledSnapshots: Map<string, PageSnapshot> = new Map();
-  let crawler: PageCrawler | null = null;
+  const planHasElements = plan.elements && plan.elements.length > 0;
 
-  const urlsToCrawl = isApiStory ? [] : _resolveUrlsToCrawl(args, plan);
+  if (planHasElements && !isApiStory) {
+    console.log(`[GeneratorAgent] Plan already has ${plan.elements.length} elements from Planner crawl — skipping redundant browser crawl`);
+  }
+
+  // ── Coverage pre-check: decide whether a browser crawl is actually needed ──
+  // The browser crawl is the slowest step (~30-90s: launch + login + step replay).
+  // For KNOWN apps we now have two file-based, authoritative locator sources:
+  //   • the curated .properties registry, and
+  //   • the app SOURCE repo (data-testid extracted from .tsx).
+  // If either already covers this page, a crawl adds little but costs a lot — so
+  // we SKIP it even when --url is passed. --force-crawl overrides to always crawl
+  // (use it to refresh locators from the live app / when source is stale).
+  let sourceCovers = false;
+  let registryCovers = false;
+  if (!isApiStory) {
+    registryCovers = registry.getPageElements(plan.page).length > 0;
+    try {
+      const sp = new SourceIndexProvider();
+      sourceCovers = sp.isAvailable() && sp.getLocatorsForPage(plan.page).length > 0;
+    } catch { /* source repo optional */ }
+  }
+  const coveredByFiles = planHasElements || registryCovers || sourceCovers;
+  const skipCrawl = !isApiStory && coveredByFiles && !args.forceCrawl;
+
+  if (skipCrawl) {
+    const sources = [
+      planHasElements ? 'plan' : '',
+      registryCovers ? 'registry' : '',
+      sourceCovers ? 'source-repo' : '',
+    ].filter(Boolean).join(' + ');
+    console.log(`[GeneratorAgent] ⚡ Skipping browser crawl — page '${plan.page}' covered by ${sources}. (Pass --force-crawl to crawl the live app anyway.)`);
+  }
+
+  const crawledSnapshots: Map<string, PageSnapshot> = new Map();
+  let crawler: PlaywrightCrawler | null = null;
+
+  const urlsToCrawl = (isApiStory || skipCrawl) ? [] : _resolveUrlsToCrawl(args, plan);
 
   if (urlsToCrawl.length > 0) {
     try {
-      crawler = new PageCrawler();
+      crawler = new PlaywrightCrawler();
       await crawler.launch();
 
       // Auto-login if requested
@@ -266,75 +462,72 @@ async function run(): Promise<void> {
       }
 
       // ── Auto-crawl related pages from navigation links ──────────────────
-      if (crawledSnapshots.size > 0) {
+      // Instead of guessing pages, replay the actual test case steps to
+      // navigate through the app and capture elements at each page transition
+      if (crawledSnapshots.size > 0 && plan.testCases.length > 0) {
         const mainSnapshot = [...crawledSnapshots.values()][0];
-        const navLinks = mainSnapshot.navigationLinks || [];
-        const neededPages = new Set<string>();
+        const baseUrl = new URL(urlsToCrawl[0]).origin;
 
-        // Parse navigation flow from plan (e.g. "Home → Login → Products → View Product → Cart")
-        const navFlow = (plan as any).navigationFlow || '';
-        if (navFlow) {
-          const flowSteps = navFlow.split(/\s*[→>]\s*/).map((s: string) => s.trim().toLowerCase());
-          flowSteps.forEach((step: string) => {
-            if (step.includes('login') || step.includes('signup')) neededPages.add('login');
-            if (step.includes('product') && (step.includes('detail') || step.includes('view'))) neededPages.add('product_details');
-            if (step.includes('cart')) neededPages.add('view_cart');
-            if (step.includes('contact')) neededPages.add('contact_us');
-          });
-          console.log(`[GeneratorAgent] Navigation flow: "${navFlow}" → pages to crawl: ${[...neededPages].join(', ') || 'none additional'}`);
-        }
+        // Replay test case steps to discover all pages in the flow
+        const allSteps = plan.testCases.flatMap((tc) =>
+          tc.steps.map((s) => ({
+            action: s.action,
+            testData: s.testData || '',
+            expected: s.expected || '',
+          }))
+        );
 
-        // Also check test case actions for pages not covered by nav flow
-        plan.testCases.forEach((tc) => {
-          tc.steps.forEach((s) => {
-            const a = s.action.toLowerCase();
-            if (a.includes('login') || a.includes('signup')) neededPages.add('login');
-            if (a.includes('product') && (a.includes('detail') || a.includes('view'))) neededPages.add('product_details');
-            if (a.includes('cart')) neededPages.add('view_cart');
-          });
-        });
+        if (allSteps.length > 0) {
+          console.log(`[GeneratorAgent] Replaying ${allSteps.length} test steps to discover all pages in the flow...`);
+          try {
+            const replaySnapshots = await crawler!.replaySteps(allSteps, urlsToCrawl[0]);
 
-        if (neededPages.size > 0 && navLinks.length > 0) {
-          const baseUrl = new URL(urlsToCrawl[0]).origin;
-          for (const needed of neededPages) {
-            const link = navLinks.find((l) => l.href.toLowerCase().includes(needed.replace('_', '')));
-            if (link && link.href) {
-              const fullUrl = link.href.startsWith('http') ? link.href : `${baseUrl}${link.href}`;
-              console.log(`[GeneratorAgent] Auto-crawling related page: ${fullUrl}`);
-              try {
-                const relatedSnapshot = await crawler!.crawl(fullUrl);
-                // Merge new elements into main snapshot
-                relatedSnapshot.elements.forEach((el) => {
-                  if (!mainSnapshot.elements.some((e) => e.locator === el.locator)) {
-                    mainSnapshot.elements.push(el);
-                  }
-                });
-                console.log(`[GeneratorAgent] → +${relatedSnapshot.elements.length} elements from ${needed} page`);
-              } catch (err) {
-                console.warn(`[GeneratorAgent] Could not crawl ${fullUrl}: ${err}`);
+            // Merge elements from all discovered pages into the main snapshot
+            for (const rs of replaySnapshots) {
+              let newCount = 0;
+              rs.elements.forEach((el) => {
+                if (!mainSnapshot.elements.some((e) => e.locator === el.locator)) {
+                  mainSnapshot.elements.push(el);
+                  newCount++;
+                }
+              });
+              if (newCount > 0) {
+                console.log(`[GeneratorAgent] → +${newCount} new elements from ${rs.url}`);
               }
             }
+            console.log(`[GeneratorAgent] Step replay complete: total ${mainSnapshot.elements.length} elements across ${replaySnapshots.length + 1} pages`);
+          } catch (err) {
+            console.warn(`[GeneratorAgent] Step replay failed: ${err}. Using elements from initial crawl only.`);
           }
         }
       }
     } finally {
       if (crawler) await crawler.close();
     }
-  } else if (!isApiStory && plan.url && plan.url.startsWith('http')) {
-    // No --url flag but plan has a URL — try loginAndNavigate
-    console.log(`[GeneratorAgent] No --url flag but plan has URL. Attempting login + navigate to: ${plan.url}`);
-    try {
-      crawler = new PageCrawler();
-      await crawler.launch();
-      const targetSnapshot = await crawler.loginAndNavigate(plan.url);
-      if (!targetSnapshot.url.includes('login')) {
-        crawledSnapshots.set(plan.page, targetSnapshot);
-        console.log(`[GeneratorAgent] ✅ Reached ${plan.page} page: ${targetSnapshot.elements.length} elements captured`);
-      } else {
-        console.warn(`[GeneratorAgent] ⚠️  Login failed — using registry only`);
+  } else if (!isApiStory && !skipCrawl && plan.url && plan.url.startsWith('http')) {
+    // No --url flag but plan has a URL
+    // If plan already has elements from Planner crawl, skip secondary browser crawl entirely
+    // The Planner's step-replay already captured all pages in the flow
+    if (planHasElements) {
+      console.log(`[GeneratorAgent] Plan has ${plan.elements.length} elements from Planner crawl — using directly (no secondary browser crawl needed)`);
+    } else {
+      // Plan has no elements — try loginAndNavigate to capture them
+      console.log(`[GeneratorAgent] No plan elements. Attempting login + navigate to: ${plan.url}`);
+      try {
+        crawler = new PlaywrightCrawler();
+        await crawler.launch();
+        const targetSnapshot = await crawler.loginAndNavigate(plan.url);
+        if (!targetSnapshot.url.includes('login')) {
+          crawledSnapshots.set(plan.page, targetSnapshot);
+          console.log(`[GeneratorAgent] ✅ Reached ${plan.page} page: ${targetSnapshot.elements.length} elements captured`);
+        } else {
+          console.warn(`[GeneratorAgent] ⚠️  Login failed — using registry only`);
+        }
+      } catch (err) {
+        console.warn(`[GeneratorAgent] ⚠️  Secondary crawl failed: ${err}. Using plan elements + registry.`);
+      } finally {
+        if (crawler) await crawler.close();
       }
-    } finally {
-      if (crawler) await crawler.close();
     }
   } else {
     console.log('[GeneratorAgent] No URLs provided — using registry elements only');
@@ -360,6 +553,13 @@ async function run(): Promise<void> {
 
   // Filter crawled snapshots: keep only elements relevant to story context
   if (crawledSnapshots.size > 0) {
+    // Detect if the story flow involves login
+    const storyNeedsLogin = [...storyKeywords].some((kw) =>
+      ['login', 'sign', 'signin', 'email', 'password', 'credential'].includes(kw)
+    ) || plan.testCases.some((tc) =>
+      tc.steps.some((s) => s.action.toLowerCase().match(/login|sign.in|enter.*email|enter.*password/))
+    );
+
     crawledSnapshots.forEach((snapshot) => {
       const beforeCount = snapshot.elements.length;
       snapshot.elements = snapshot.elements.filter((el) => {
@@ -368,6 +568,10 @@ async function run(): Promise<void> {
         if (el.type === 'input' || el.type === 'select' || el.type === 'textarea') return true;
         // Always keep: buttons with meaningful labels (close, submit, search, login)
         if (el.type === 'button') return true;
+        // Always keep login-related elements if the story flow needs login
+        if (storyNeedsLogin && elText.match(/email|password|login|sign/)) return true;
+        // Always keep cart/checkout elements for e-commerce flows
+        if (elText.match(/cart|checkout|quantity/)) return true;
         // For links/other: only keep if keywords match
         return [...storyKeywords].some((kw) => elText.includes(kw));
       });
@@ -392,6 +596,25 @@ async function run(): Promise<void> {
       });
     });
     console.log(`[GeneratorAgent] Element map from crawl: ${elementRefs.size} refs`);
+  } else if (planHasElements) {
+    // Use plan elements directly (Planner already crawled)
+    const pageName = plan.page;
+    if (!newElementsByPage.has(pageName)) newElementsByPage.set(pageName, []);
+
+    for (const el of plan.elements) {
+      if (!el.key || !el.locator) continue;
+      const ref = `${pageName}.${el.key}`;
+      elementRefs.set(ref, ref);
+      newElementsByPage.get(pageName)!.push({
+        key: el.key,
+        locator: el.locator,
+        type: el.type || 'other',
+        label: el.label || el.key,
+        tag: el.tag || 'unknown',
+        source: 'plan',
+      });
+    }
+    console.log(`[GeneratorAgent] Element map from plan: ${elementRefs.size} refs (no crawl needed)`);
   }
 
   // ALWAYS inject from registry — complements crawled elements with existing refs
@@ -399,6 +622,58 @@ async function run(): Promise<void> {
   if (!isApiStory) {
     _injectFromRegistry(plan, registry, elementRefs);
     console.log(`[GeneratorAgent] Element map total (crawl + registry): ${elementRefs.size} refs`);
+  }
+
+  // ── Step 4b: Seed AUTHORITATIVE elements from the app SOURCE repo ───────────
+  // The dev repo's source (data-testid in .tsx) is a complete, authoritative
+  // locator set — it covers pages a crawl can't reach (login SPA, deep wizard
+  // steps) AND error elements the crawl/registry lack. This makes the Generator
+  // independent of a successful crawl for known apps.
+  //
+  // Precedence: registry/crawl keys already in elementRefs WIN (not overwritten);
+  // source only ADDS what's missing. New source elements are written to
+  // .properties via newElementsByPage. Source validations are attached to the
+  // plan so negative cases can assert REAL messages on REAL error elements.
+  if (!isApiStory) {
+    try {
+      const sourceProvider = new SourceIndexProvider();
+      if (sourceProvider.isAvailable()) {
+        const sourceLocators = sourceProvider.getLocatorsForPage(plan.page);
+        if (sourceLocators.length > 0) {
+          if (!newElementsByPage.has(plan.page)) newElementsByPage.set(plan.page, []);
+          const pageList = newElementsByPage.get(plan.page)!;
+          const existingKeys = new Set(
+            [...elementRefs.keys()].map((r) => r.split('.').slice(1).join('.').toLowerCase())
+          );
+          let addedFromSource = 0;
+          for (const sl of sourceLocators) {
+            if (existingKeys.has(sl.key.toLowerCase())) continue; // registry/crawl wins
+            const ref = `${plan.page}.${sl.key}`;
+            elementRefs.set(ref, ref);
+            pageList.push({
+              key: sl.key,
+              locator: sl.locator,
+              type: _inferTypeFromLocator(sl.key, sl.locator),
+              label: sl.key,
+              tag: 'unknown',
+              source: 'source-repo',
+            } as any);
+            existingKeys.add(sl.key.toLowerCase());
+            addedFromSource++;
+          }
+          console.log(`[GeneratorAgent] Source repo: added ${addedFromSource} authoritative element(s) from app source (element map now ${elementRefs.size} refs).`);
+
+          // Attach source validations for honest negative-case generation.
+          const sourceValidations = sourceProvider.getValidationsForPage(plan.page);
+          if (sourceValidations.length > 0) {
+            (plan as any).sourceValidations = sourceValidations;
+            console.log(`[GeneratorAgent] Source repo: ${sourceValidations.length} validation rule(s) available for negative cases.`);
+          }
+        }
+      }
+    } catch (err) {
+      console.warn(`[GeneratorAgent] Source-repo seeding skipped: ${(err as Error).message}`);
+    }
   }
 
 
@@ -430,7 +705,15 @@ async function run(): Promise<void> {
   // ── Step 6: Generate feature file (per-AC AI calls or deterministic fallback) ─
   console.log(`\n[GeneratorAgent] Generating feature file...`);
 
-  const frameworkContext = ContextEnricher.getFullContext(plan.page);
+  // Relevance hint (page + url + source + test case titles) drives selective
+  // domain knowledge — telecom knowledge loads only for telecom plans.
+  const genRelevanceHint = [
+    plan.page,
+    plan.url || '',
+    plan.sourceFile || '',
+    plan.testCases.map((tc) => tc.title).join(' '),
+  ].join(' ').slice(0, 4000);
+  const frameworkContext = ContextEnricher.getFullContext(plan.page, genRelevanceHint);
   console.log(`[GeneratorAgent] Framework context: ${frameworkContext ? 'loaded' : 'none available'}`);
 
   let featureContent: string;
@@ -460,12 +743,20 @@ async function run(): Promise<void> {
     // Build available elements list for AI context
     const allElements = [...elementRefs.values()];
 
-    for (const tc of plan.testCases) {
+    // Each test case is generated INDEPENDENTLY, so the per-AC AI calls can run
+    // CONCURRENTLY instead of sequentially. We build one async task per test case
+    // that resolves to its rendered lines, run them all with Promise.all, then
+    // assemble the feature in the original order. This cuts the AI phase from
+    // (N × call-latency) to roughly a single call-latency.
+    const scenarioTasks = plan.testCases.map((tc) => (async (): Promise<string[]> => {
+      // NOTE: this is a thunk (arrow returning a promise) — NOT invoked here.
+      // It is invoked in batches below so concurrency stays bounded.
+      const scenarioLines: string[] = [];
       const tags = tc.type === 'negative' ? '@negative @regression' : '@smoke @e2e';
-      featureLines.push(`  ${tags}`);
-      featureLines.push(`  Scenario: ${tc.id} ${tc.title}`);
+      scenarioLines.push(`  ${tags}`);
+      scenarioLines.push(`  Scenario: ${tc.id} ${tc.title}`);
       if (!isApiStory) {
-        featureLines.push(`    Given I navigate to the application`);
+        scenarioLines.push(`    Given I navigate to the application`);
       }
 
       // Filter elements relevant to THIS AC's keywords (max 40)
@@ -475,13 +766,12 @@ async function run(): Promise<void> {
         .split(/[\s'".,;:!?]+/)
         .filter((w) => w.length > 3);
       
-      const relevantElements = allElements.filter((ref) => {
-        const refLower = ref.toLowerCase();
-        // Always include inputs, buttons, and selects
-        if (refLower.includes('input') || refLower.includes('btn') || refLower.includes('select')) return true;
-        // Include if any AC keyword matches
-        return acKeywords.some((kw) => refLower.includes(kw));
-      }).slice(0, 40);
+      // Prioritize current page elements over other pages
+      const currentPageElements = allElements.filter((ref) => ref.startsWith(`${plan.page}.`));
+      
+      // ONLY include current page elements — do NOT show other pages' elements
+      // This prevents AI confusion between AutomationPractise.InputEmail vs TeleConnect.LoginEmail
+      const relevantElements = currentPageElements.slice(0, 60);
 
       // If too few matched, include the first 30 elements as general context
       // Include locator info so AI can match action text to correct element
@@ -490,65 +780,214 @@ async function run(): Promise<void> {
         if (parts.length < 2) return `  '${ref}'`;
         const pageName = parts[0];
         const key = parts[1];
+
+        // First check plan elements (new elements from crawl — these have exact locators)
+        const planEl = plan.elements?.find((e: any) => e.key === key);
+        if (planEl && planEl.locator) {
+          return `  '${ref}' [locator: ${planEl.locator}]`;
+        }
+
+        // Then check registry (existing elements)
         const pageElements = registry.getPageElements(pageName);
         const el = pageElements.find((e) => e.elementKey === key);
         if (el && el.locator) {
-          // Extract readable hint from locator: data-testid='login-submit' → "login-submit"
-          const testIdMatch = el.locator.match(/(?:data-testid|data-qa|data-cy)='([^']+)'/);
-          const textMatch = el.locator.match(/text=(.+)/);
-          const placeholderMatch = el.locator.match(/placeholder=(.+)/);
-          const hint = testIdMatch?.[1] || textMatch?.[1] || placeholderMatch?.[1] || '';
-          return hint ? `  '${ref}' (${hint})` : `  '${ref}'`;
+          return `  '${ref}' [locator: ${el.locator}]`;
         }
+
+        // Check newElementsByPage (crawled elements not yet in registry)
+        const newEls = newElementsByPage.get(pageName);
+        if (newEls) {
+          const newEl = newEls.find((e) => e.key === key);
+          if (newEl && newEl.locator) {
+            return `  '${ref}' [locator: ${newEl.locator}]`;
+          }
+        }
+
         return `  '${ref}'`;
       };
 
       const availableElements = relevantElements.length >= 5 
         ? relevantElements.map(formatElementWithLabel)
-        : allElements.slice(0, 30).map(formatElementWithLabel);
+        : currentPageElements.length > 0
+          ? currentPageElements.map(formatElementWithLabel)
+          : allElements.filter((ref) => ref.startsWith(`${plan.page}.`)).slice(0, 30).map(formatElementWithLabel);
 
       // Per-AC AI call
-      const acPrompt = isApiStory
-        ? GeneratePrompts.buildPerACPromptAPI(tc, plan.url || '')
-        : GeneratePrompts.buildPerACPrompt(tc, plan.page, availableElements);
-      const deterministicFallback = tc.steps.map((s) => {
-        const mapped = GeneratePrompts['_mapStepToGherkin'](s, plan.page, elementRefs);
-        return mapped.filter((l: string) => !l.startsWith('#')).map((l: string) => `    ${l}`).join('\n');
-      }).join('\n');
+      // For API stories: if steps are already Gherkin-formatted, pass them through directly
+      // This avoids AI dropping data tables or re-inventing step patterns
+      // For API stories, ALWAYS use passthrough (both happy and negative cases)
+      const stepsAreGherkin = isApiStory;
 
-      const aiSteps = await LLMClient.askWithSystem(
-        'You are a BDD automation expert. Output ONLY Gherkin steps — no explanation, no markdown, no headers. IMPORTANT: Include ALL steps from the test case — do NOT skip login, navigation, or setup steps even if they seem repetitive. Every scenario runs independently in a fresh browser so ALL steps must be present.',
-        acPrompt,
-        deterministicFallback
-      );
+      let stepLines: string[];
 
-      // Parse AI response — each line should be a step
-      // Then fix any refs that AI invented (not in our element list)
-      const validRefs = new Set([...elementRefs.keys(), ...elementRefs.values()]);
-      const stepLines = aiSteps
-        .split('\n')
-        .map((l) => l.trim())
-        .filter((l) => l.match(/^(When|Then|And|But|Given)\s/i))
-        .map((l) => {
-          // Replace any 'OtherPage.Element' refs not in our list with 'PlanPage.Element'
-          return l.replace(/'([A-Z][a-zA-Z0-9]+)\.([A-Za-z][A-Za-z0-9]+)'/g, (match, page, key) => {
-            const fullRef = `${page}.${key}`;
-            if (validRefs.has(fullRef)) return match; // valid ref, keep it
-            // AI invented this ref — replace page name with plan page
-            return `'${plan.page}.${key}'`;
+      if (stepsAreGherkin) {
+        // Direct passthrough — steps are already correct Gherkin from the story ACs
+        stepLines = [];
+        for (const s of tc.steps) {
+          let action = s.action.replace(/^Verify:\s*/i, '').trim();
+          // Skip "I set the base url" — it's in Background
+          if (action.match(/I set the base url/i)) continue;
+
+          // Extract any inline body table embedded in the action text:
+          //   "...with body: [data: | key | value | | title | X |]"  or  "...with body: | key | value |"
+          let inlineTable = '';
+          const inlineDataMatch = action.match(/with body:\s*(?:\[data:\s*)?(\|.*)/i);
+          if (inlineDataMatch) {
+            inlineTable = inlineDataMatch[1].replace(/\]$/, '').trim();
+            // Strip the inline table from the action, leave just "...with body:"
+            action = action.replace(/(with body:).*/i, '$1');
+          }
+
+          // Strip any leading Gherkin keyword already in the action text
+          // (e.g. AI produces "Then the response status should be 400" — we add our own keyword)
+          action = action.replace(/^(?:Given|When|Then|And|But)\s+/i, '').trim();
+
+          // Normalize action phrasing to match real step patterns
+          action = action
+            .replace(/^Send a /i, 'I send a ')
+            .replace(/^Store /i, 'I store ');
+
+          // Determine keyword based on the cleaned action
+          let keyword = 'And';
+          if (action.match(/^I send a/i)) keyword = 'When';
+          else if (action.match(/^the response/i)) keyword = 'Then';
+          else if (action.match(/^I set/i)) keyword = 'Given';
+
+          stepLines.push(`    ${keyword} ${action}`);
+
+          // Render data table — from testData field OR from inline extraction
+          let tableSource = '';
+          if (s.testData && s.testData.includes('|')) {
+            tableSource = s.testData;
+          } else if (inlineTable) {
+            tableSource = inlineTable;
+          }
+
+          if (tableSource) {
+            // Split into rows — handle both newline-separated and inline (| a | b | | c | d |)
+            let rows: string[];
+            if (tableSource.includes('\n')) {
+              rows = tableSource.split('\n').filter((l) => l.trim().startsWith('|'));
+            } else {
+              // Inline format: "| key | value | | title | X |" → split on "| |" boundaries
+              rows = tableSource.split(/\|\s*\|/).map((r, i, arr) => {
+                let row = r.trim();
+                if (!row.startsWith('|')) row = '| ' + row;
+                if (!row.endsWith('|')) row = row + ' |';
+                return row;
+              });
+            }
+            rows.forEach((tl) => stepLines.push(`      ${tl.trim()}`));
+          }
+        }
+      } else {
+        // AI generation path (original)
+        const acPrompt = isApiStory
+          ? GeneratePrompts.buildPerACPromptAPI(tc, plan.url || '')
+          : GeneratePrompts.buildPerACPrompt(tc, plan.page, availableElements, (plan as any).testData);
+        const deterministicFallback = tc.steps.map((s) => {
+          const mapped = GeneratePrompts['_mapStepToGherkin'](s, plan.page, elementRefs);
+          return mapped.filter((l: string) => !l.startsWith('#')).map((l: string) => `    ${l}`).join('\n');
+        }).join('\n');
+
+        const aiSteps = await LLMClient.askWithSystem(
+          `You are a BDD automation expert. Output ONLY Gherkin steps — no explanation, no markdown, no headers, no comments.
+RULES:
+- Include ALL steps from the test case — do NOT skip login, navigation, or setup steps.
+- Every scenario runs independently in a fresh browser so ALL steps must be present.
+- Use ONLY step patterns provided in the prompt — do NOT invent new patterns.
+- Use ONLY elements from the "Available Elements" list — do NOT invent element keys.
+- Element keys and locators are CASE-EXACT from the live DOM. Use them EXACTLY as shown (do NOT change casing).
+- If an exact element is not available, use the CLOSEST matching element creatively.
+- NEVER output comments (# FLAG, # NOTE, etc.) — only output executable Gherkin steps.
+- For negative tests: use WRONG values (not $$variables) and end with url assertion to prove failure.
+- NEVER use 'should have value' after entering data.
+- All strings must have proper opening AND closing quotes.`,
+          acPrompt,
+          deterministicFallback
+        );
+
+        // Parse AI response — each line should be a step
+        // Then fix any refs that AI invented (not in our element list)
+        const validRefs = new Set([...elementRefs.keys(), ...elementRefs.values()]);
+        const currentPageRefs = new Set(
+          [...elementRefs.keys(), ...elementRefs.values()].filter((r) => r.startsWith(`${plan.page}.`))
+        );
+        // Build a lookup of all valid element keys (lowercased) for fuzzy matching
+        const validKeysByPage = new Map<string, string>();
+        [...currentPageRefs].forEach((r) => {
+          const parts = r.split('.');
+          if (parts.length === 2) validKeysByPage.set(parts[1].toLowerCase(), r);
+        });
+
+        stepLines = aiSteps
+          .split('\n')
+          .map((l) => l.trim())
+          .filter((l) => l.match(/^(When|Then|And|But|Given)\s/i) || l.trim().startsWith('|'))
+          .map((l) => {
+            // Keep table rows as-is
+            if (l.trim().startsWith('|')) return `      ${l.trim()}`;
+            // Replace any element refs — validate against known elements
+            return l.replace(/'([A-Z][a-zA-Z0-9]+)\.([A-Za-z][A-Za-z0-9]+)'/g, (match, page, key) => {
+              const fullRef = `${page}.${key}`;
+            const keyLower = key.toLowerCase();
+
+            // If it's already a valid ref (any page), keep it
+            if (validRefs.has(fullRef)) return match;
+
+            // If it's a current page ref that exists, keep it
+            if (page === plan.page && validKeysByPage.has(keyLower)) {
+              return `'${validKeysByPage.get(keyLower)}'`;
+            }
+
+            // Fuzzy match: try to find the closest valid key on current page
+            const fuzzyMatch = _fuzzyMatchElement(keyLower, validKeysByPage);
+            if (fuzzyMatch) return `'${fuzzyMatch}'`;
+
+            // For refs from other pages, try to find equivalent on current page
+            if (page !== plan.page) {
+              const currentPageMatch = [...currentPageRefs].find((r) => {
+                const parts = r.split('.');
+                return parts[1]?.toLowerCase().includes(keyLower.replace('login', '').replace('nav', ''));
+              });
+              if (currentPageMatch) return `'${currentPageMatch}'`;
+            }
+
+            // Mark as INVALID — will be filtered out below
+            return `'INVALID_REF:${page}.${key}'`;
           });
         })
-        .map((l) => `    ${l}`);
+        // Filter out lines with invalid (hallucinated) refs AND remove FLAG comment lines
+        .filter((l) => !l.includes('INVALID_REF:') && !l.startsWith('# FLAG:'))
+        .map((l) => l.trim().startsWith('|') ? l : `    ${l}`);
+
+        if (stepLines.length === 0) {
+          // AI returned nothing usable — use deterministic
+          stepLines = deterministicFallback.split('\n').filter((l) => l.trim());
+        }
+      } // end else (AI path)
 
       if (stepLines.length > 0) {
-        featureLines.push(...stepLines);
-      } else {
-        // AI returned nothing usable — use deterministic
-        featureLines.push(deterministicFallback);
+        scenarioLines.push(...stepLines);
       }
 
-      featureLines.push('');
+      scenarioLines.push('');
+      return scenarioLines;
+    }));
+
+    // Run per-AC generations concurrently (bounded), preserving order. A cap
+    // avoids hammering the LLM API / hitting rate limits on large plans while
+    // still giving most of the speedup over sequential calls.
+    const CONCURRENCY = 4;
+    console.log(`[GeneratorAgent] Generating ${scenarioTasks.length} scenario(s) — up to ${CONCURRENCY} concurrently...`);
+    const scenarioResults: string[][] = new Array(scenarioTasks.length);
+    for (let i = 0; i < scenarioTasks.length; i += CONCURRENCY) {
+      const batch = scenarioTasks.slice(i, i + CONCURRENCY);
+      // Invoke each thunk now so only this batch runs concurrently.
+      const settled = await Promise.all(batch.map((task) => task()));
+      settled.forEach((lines, j) => { scenarioResults[i + j] = lines; });
     }
+    scenarioResults.forEach((lines) => featureLines.push(...lines));
 
     featureContent = featureLines.join('\n');
 
@@ -561,34 +1000,29 @@ async function run(): Promise<void> {
     featureContent = GeneratePrompts.buildFallback(plan, elementRefs);
     console.log(`[GeneratorAgent] Feature file generated via deterministic mapper (no AI)`);
   }
-  // ── Step 7: Detect unresolved element refs in feature (warn, don't write TODOs) ─
+  // ── Step 7: Detect unresolved element refs in feature (warn + strip) ────────
   const unresolvedElements = _detectUnresolvedElements(featureContent, plan.page, registry, plan.url || '');
   if (unresolvedElements.length > 0) {
     const urlHint = plan.url ? `\n  Crawl the page: npm run agent:generate -- --plan ${args.plan} --url ${plan.url}` : '';
     console.warn(`\n[GeneratorAgent] ⚠️  ${unresolvedElements.length} element(s) referenced in feature but NOT in ${plan.page}.properties:`);
     unresolvedElements.forEach((key) => console.warn(`    - ${plan.page}.${key}`));
-    console.warn(`  These elements need real locators before tests will pass.`);
-    console.warn(`  Fix: Use Playwright MCP or provide --url to crawl the live DOM.${urlHint}\n`);
+    console.warn(`  These steps will be removed from the feature file.`);
+    console.warn(`  Fix: Ensure the Planner crawls all pages in the flow (use --url with the starting page).${urlHint}\n`);
 
-    // Write placeholder entries to .properties with TODO comment (locator value empty — fill manually)
-    const propsPath = path.resolve(process.cwd(), 'src', 'pages', 'properties', `${plan.page}.properties`);
-    if (fs.existsSync(propsPath)) {
-      const existingContent = fs.readFileSync(propsPath, 'utf-8');
-      const existingKeys = existingContent.split('\n')
-        .filter((l) => l.includes('=') && !l.startsWith('#'))
-        .map((l) => l.split('=')[0].trim());
+    // Strip lines referencing unresolved elements from feature content
+    const unresolvedSet = new Set(unresolvedElements);
+    featureContent = featureContent
+      .split('\n')
+      .filter((line) => {
+        const refMatch = line.match(new RegExp(`'${plan.page}\\.(\\w+)'`));
+        if (refMatch && unresolvedSet.has(refMatch[1])) {
+          return false; // Drop this line — element doesn't exist
+        }
+        return true;
+      })
+      .join('\n');
 
-      const newPlaceholders = unresolvedElements.filter((key) => !existingKeys.includes(key));
-      if (newPlaceholders.length > 0) {
-        const lines: string[] = ['', `# TODO: Add locators for unresolved elements (visible after interaction)`];
-        newPlaceholders.forEach((key) => {
-          lines.push(`# TODO: Fill locator — inspect live DOM after navigating to this state`);
-          lines.push(`${key}=`);
-        });
-        fs.appendFileSync(propsPath, lines.join('\n') + '\n', 'utf-8');
-        console.log(`[GeneratorAgent] Added ${newPlaceholders.length} placeholder(s) to ${plan.page}.properties — fill locators manually`);
-      }
-    }
+    console.log(`[GeneratorAgent] Stripped ${unresolvedElements.length} step(s) with unresolved element refs`);
   }
 
   // ── Step 7b: Validate output (P6 — gate before --apply) ───────────────────
@@ -614,35 +1048,20 @@ async function run(): Promise<void> {
     .replace(new RegExp(`^${plan.page}-plan_from_`, 'i'), '')
     .replace(/^[^_]+-plan_from_/, '')
     || plan.page;
+
+  // ── Step 8b: Mask credentials in feature file ─────────────────────────────
+  // Replace credential values with $$Secret references and save actual values to runtime-store
+  featureContent = _maskCredentialsInFeature(featureContent, plan.page);
+
   const featurePath = featureWriter.write(featureContent, plan.page, sourceSuffix, args.apply, isApiStory);
 
   // ── Done ──────────────────────────────────────────────────────────────────
-  console.log('\n═══════════════════════════════════════════');
-  console.log('  Generator Agent — Complete');
-  console.log('═══════════════════════════════════════════');
-
-  if (writtenProps.length > 0) {
-    console.log('  Properties files:');
-    writtenProps.forEach((p) => console.log(`    ${p}`));
-  } else {
-    console.log('  Properties: No new elements — all existing refs reused');
-  }
-
-  console.log(`  Feature file: ${featurePath}`);
-  console.log('');
-
-  if (!args.apply) {
-    console.log('  Review generated/features/ then apply:');
-    console.log(`  npm run agent:generate -- --plan ${args.plan} --apply`);
-  } else {
-    console.log('  Applied to features/web/ — run: npm test');
-  }
-  console.log('═══════════════════════════════════════════\n');
+  return { featurePath, propsWritten: writtenProps };
 }
 
 // ─── Private Helpers ──────────────────────────────────────────────────────────
 
-function _resolveUrlsToCrawl(args: GeneratorArgs, plan: TestPlan): string[] {
+function _resolveUrlsToCrawl(args: SingleGeneratorArgs, plan: TestPlan): string[] {
   // Priority 1: explicit --url or --urls flags
   if (args.urls && args.urls.length > 0) return args.urls;
   if (args.targetUrl) return [args.targetUrl];
@@ -660,6 +1079,22 @@ function _resolveUrlsToCrawl(args: GeneratorArgs, plan: TestPlan): string[] {
 
   // Priority 3: no URLs → falls through to registry injection
   return [];
+}
+
+/**
+ * Infers a DiscoveredElement type from a source-repo element's key/locator.
+ * Source elements only carry key + XPath, so type is derived from the key prefix
+ * and the tag embedded in the locator. Used when seeding source-repo elements.
+ */
+function _inferTypeFromLocator(key: string, locator: string): string {
+  const k = key.toLowerCase();
+  const loc = locator.toLowerCase();
+  if (k.startsWith('btn') || loc.includes('//button') || loc.includes('button')) return 'button';
+  if (k.startsWith('select') || loc.includes('//select')) return 'select';
+  if (loc.includes('//textarea')) return 'textarea';
+  if (k.startsWith('input') || loc.includes('//input')) return 'input';
+  if (k.startsWith('nav') || loc.includes('//a')) return 'link';
+  return 'other';
 }
 
 function _injectFromRegistry(
@@ -713,9 +1148,14 @@ function _injectFromRegistry(
     .join(' ')
     .toLowerCase();
 
-  // Always include TeleConnect (login page) — almost every flow starts with login
-  if (!navigationText.includes('teleconnect')) {
-    const loginKeywords = ['login', 'sign in', 'sign-in', 'credentials', 'email', 'password'];
+  // Always include TeleConnect (login page) — but ONLY if the plan page doesn't have its own login/email fields
+  // Skip if the current page already has InputEmail/InputPassword (e.g., registration page)
+  const currentPageHasOwnFields = [...elementRefs.values()].some((r) =>
+    r.startsWith(`${plan.page}.`) && (r.includes('InputEmail') || r.includes('InputPassword'))
+  );
+
+  if (!navigationText.includes('teleconnect') && !currentPageHasOwnFields) {
+    const loginKeywords = ['login', 'sign in', 'sign-in', 'credentials'];
     const hasLoginSteps = loginKeywords.some((kw) => navigationText.includes(kw));
     if (hasLoginSteps) {
       const teleConnectEls = registry.getPageElements('TeleConnect');
@@ -726,6 +1166,8 @@ function _injectFromRegistry(
         console.log(`[GeneratorAgent] Login detected: TeleConnect → ${teleConnectEls.length} elements injected`);
       }
     }
+  } else if (currentPageHasOwnFields) {
+    console.log(`[GeneratorAgent] Skipping TeleConnect injection — ${plan.page} has its own email/password fields`);
   }
 
   allPageNames.forEach((pageName) => {
@@ -769,37 +1211,48 @@ function _postFixFeature(
   // 5. Fix "should be displayed" → "should be visible"
   fixed = fixed.replace(/should be displayed/g, 'should be visible');
 
-  // 6. Fix login element mismatches: find correct login elements from refs
-  const loginEmailRef = [...elementRefs.values()].find((r) => r.toLowerCase().includes('loginemail'));
-  const loginPasswordRef = [...elementRefs.values()].find((r) => r.toLowerCase().includes('loginpassword'));
-  const loginSubmitRef = [...elementRefs.values()].find((r) => r.toLowerCase().includes('loginsubmit'));
+  // 6. Fix login element mismatches: ONLY remap if this is a login-focused page
+  // Skip this fix entirely if the plan page is NOT the login page (e.g., registration pages)
+  const isLoginFlow = pageName.toLowerCase().includes('login') || pageName.toLowerCase() === 'teleconnect';
+  
+  if (isLoginFlow) {
+    const loginEmailRef = [...elementRefs.values()].find((r) => r.toLowerCase().includes('loginemail'));
+    const loginPasswordRef = [...elementRefs.values()].find((r) => r.toLowerCase().includes('loginpassword'));
+    const loginSubmitRef = [...elementRefs.values()].find((r) => r.toLowerCase().includes('loginsubmit'));
 
-  if (loginEmailRef) {
-    // Replace any *Email or *InputEmail that's not the correct one
-    fixed = fixed.replace(/'[A-Z][a-zA-Z]+\.(?:Input)?Email'/g, `'${loginEmailRef}'`);
-    fixed = fixed.replace(/'[A-Z][a-zA-Z]+\.InputEmail'/g, `'${loginEmailRef}'`);
-  }
-  if (loginPasswordRef) {
-    fixed = fixed.replace(/'[A-Z][a-zA-Z]+\.(?:Input)?Password'/g, `'${loginPasswordRef}'`);
-  }
-  if (loginSubmitRef) {
-    // Replace ANY button click that appears right after password entry — that's the login submit
-    // Pattern: enter password → click SOME button (handles When/And)
-    fixed = fixed.replace(
-      new RegExp(`(into '${loginPasswordRef?.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') || 'TeleConnect.LoginPassword'}'\\s*\\n\\s*(?:When|And) I click )'[A-Z][a-zA-Z]+\\.[A-Za-z]+'`, 'g'),
-      `$1'${loginSubmitRef}'`
-    );
+    if (loginEmailRef) {
+      // Only fix generic refs that DON'T belong to the current page
+      fixed = fixed.replace(new RegExp(`'(?!${pageName}\\.)[A-Z][a-zA-Z]+\\.(?:Input)?Email'`, 'g'), `'${loginEmailRef}'`);
+    }
+    if (loginPasswordRef) {
+      fixed = fixed.replace(new RegExp(`'(?!${pageName}\\.)[A-Z][a-zA-Z]+\\.(?:Input)?Password'`, 'g'), `'${loginPasswordRef}'`);
+    }
+    if (loginSubmitRef) {
+      fixed = fixed.replace(
+        new RegExp(`(into '${loginPasswordRef?.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') || 'TeleConnect.LoginPassword'}'\\s*\\n\\s*(?:When|And) I click )'[A-Z][a-zA-Z]+\\.[A-Za-z]+'`, 'g'),
+        `$1'${loginSubmitRef}'`
+      );
+    }
   }
 
   // 7. Fix "Then 'text content' should be visible" → needs Page.Element format
-  // If the ref is just text (no dot), it's wrong — try to map to an element
-  fixed = fixed.replace(/Then '([^'.]+)' should be visible/g, (match, text) => {
-    // If it has a dot, it's already in Page.Element format
-    if (text.includes('.')) return match;
-    // Otherwise it's plain text — make it a page ref
-    const key = text.replace(/[^a-zA-Z0-9]/g, '').substring(0, 20);
-    return `Then '${pageName}.${key}' should be visible`;
-  });
+  // 7. Remove steps that reference plain text (no dot) as element — AI hallucination
+  // e.g., "Then 'Product added to shopping cart.' should be visible" is not a valid element ref
+  const lines = fixed.split('\n');
+  fixed = lines.filter((line) => {
+    // Match steps with single-quoted refs that have NO dot (plain text, not Page.Element)
+    const plainTextRef = line.match(/(?:Then|And|When)\s+'([^'.]+)'\s+should\s+(?:be visible|have text|contain text|be hidden)/);
+    if (plainTextRef) {
+      const text = plainTextRef[1];
+      // If it's just text with no dot, it's a hallucinated ref — drop it
+      if (!text.includes('.')) return false;
+    }
+    // Also drop lines like "the cart icon should have text '1'" — not a valid step pattern
+    if (line.match(/the cart (?:icon|count) should/i)) return false;
+    // Drop "should not be visible" — not a valid step pattern in this framework
+    if (line.match(/should not be visible/i)) return false;
+    return true;
+  }).join('\n');
 
   // 8. Remove completely empty scenarios (only Given + nothing)
   // Keep scenarios that have at least one When or Then after Given
@@ -844,7 +1297,73 @@ function _postFixFeature(
   // "Then I store" → "And I store" (store is usually continuation)
   fixed = fixed.replace(/\n(\s*)Then I store/g, '\n$1And I store');
 
+  // Fix doubled Gherkin keywords: "And Then ...", "When Then ...", "Then When ..." → keep the first
+  fixed = fixed.replace(/^(\s*)(Given|When|Then|And|But)\s+(Given|When|Then|And|But)\s+/gm, '$1$2 ');
+
+  // Fix "GET request ... with query params:" that has NO table below it → make it a plain GET
+  // The "with query params:" step REQUIRES a data table; without one it crashes at runtime
+  {
+    const lines = fixed.split('\n');
+    for (let i = 0; i < lines.length; i++) {
+      const m = lines[i].match(/^(\s*)(When|And|Given)\s+I send a GET request to (['"][^'"]+['"])\s+with query params:\s*$/);
+      if (m) {
+        // Check if next non-empty line is a table row
+        const nextLine = (lines[i + 1] || '').trim();
+        if (!nextLine.startsWith('|')) {
+          // No table — convert to plain GET request
+          lines[i] = `${m[1]}${m[2]} I send a GET request to ${m[3]}`;
+        }
+      }
+    }
+    fixed = lines.join('\n');
+  }
+
   return fixed;
+}
+
+/**
+ * Fuzzy match an AI-invented element key to the closest valid element on the current page.
+ * Uses keyword extraction and substring matching.
+ */
+function _fuzzyMatchElement(keyLower: string, validKeysByPage: Map<string, string>): string | null {
+  // Direct case-insensitive match
+  if (validKeysByPage.has(keyLower)) return validKeysByPage.get(keyLower)!;
+
+  // Common AI hallucination patterns → real element mapping
+  const patterns: [RegExp, string[]][] = [
+    [/email/i, ['inputemail', 'email']],
+    [/password/i, ['inputpassword', 'password']],
+    [/login.*submit|submit.*login|btnlogin/i, ['btnloginsubmit', 'loginsubmit', 'btnregistersubmit']],
+    [/register.*submit|submit.*register/i, ['btnregistersubmit', 'registersubmit']],
+    [/sign.*in|signin/i, ['navnavsignin', 'navsignin']],
+    [/home/i, ['navnavhome', 'navhome']],
+    [/cart.*quantity|cart.*count/i, ['cartquantity', 'navcart']],
+    [/add.*cart/i, ['btnaddtocart', 'addtocart']],
+    [/product.*name/i, ['productname']],
+    [/unit.*price|product.*price/i, ['unitprice']],
+    [/first.*name/i, ['inputfirstname', 'firstname']],
+    [/last.*name/i, ['inputlastname', 'lastname']],
+    [/country/i, ['selectcountry', 'country']],
+    [/phone/i, ['inputphone', 'phone']],
+    [/register.*link/i, ['navregisterlink', 'registerlink']],
+  ];
+
+  for (const [pattern, candidates] of patterns) {
+    if (pattern.test(keyLower)) {
+      for (const candidate of candidates) {
+        if (validKeysByPage.has(candidate)) return validKeysByPage.get(candidate)!;
+      }
+    }
+  }
+
+  // Substring match: if the invented key contains a valid key or vice versa
+  for (const [validKey, ref] of validKeysByPage) {
+    if (keyLower.includes(validKey) || validKey.includes(keyLower)) {
+      return ref;
+    }
+  }
+
+  return null;
 }
 
 function _buildConventionElements(
@@ -856,9 +1375,118 @@ function _buildConventionElements(
   // Instead, the user should provide --url for live DOM crawling.
   if (plan.testCases.length > 0) {
     console.log('[GeneratorAgent] ℹ️  No URL provided and no existing .properties for this page.');
-    console.log('[GeneratorAgent] ℹ️  Provide --url to auto-crawl real locators, or create the properties file manually using Playwright MCP.');
+    console.log('[GeneratorAgent] ℹ️  Provide --url to auto-crawl real locators, or create the properties file manually.');
   }
   return [];
+}
+
+/**
+ * Detects credential values in the feature file and replaces them with $$Secret references.
+ * Saves actual values to testdata/runtime-store.json so the framework resolves them at runtime.
+ */
+function _maskCredentialsInFeature(content: string, pageName: string): string {
+  const secrets: Record<string, string> = {};
+  let secretIndex = 0;
+
+  // Split feature into scenarios to only mask credentials in happy-path scenarios
+  // Negative scenarios intentionally use wrong/invalid values — don't mask those
+  const lines = content.split('\n');
+  let inNegativeScenario = false;
+  const processedLines: string[] = [];
+
+  for (const line of lines) {
+    // Detect scenario type by looking at tags
+    if (line.trim().startsWith('@negative')) {
+      inNegativeScenario = true;
+    } else if (line.trim().startsWith('@smoke') || line.trim().startsWith('@e2e')) {
+      inNegativeScenario = false;
+    }
+
+    // Mask credentials in ALL scenarios (not just happy path).
+    // In negative scenarios, only mask if the field is a credential field AND the value
+    // matches the known test credentials (not intentionally wrong values).
+    // Match all step verbs: "I enter", "I type", "I fill", "I input"
+    // Match both single-quoted and double-quoted values
+    if (line.match(/\s+(?:When|And|Given)\s+I (?:enter|type|fill|input)\s+['"]/)) {
+      const masked = line.replace(
+        /((?:When|And|Given)\s+I (?:enter|type|fill|input)\s+['"])([^'"]+)(['"]\s+into\s+['"])([^'"]+)(['"])/,
+        (match, prefix, value, mid, elementRef, suffix) => {
+          // NEVER mask ## tokens (random data generators) or $$ variables (already masked/cross-scenario)
+          // These are framework syntax, not real credentials
+          if (value.startsWith('##') || value.startsWith('$$') || value.startsWith('{')) {
+            return match;
+          }
+
+          const elementLower = elementRef.toLowerCase();
+          const isEmailField = elementLower.includes('email') || elementLower.includes('username') || elementLower.includes('user');
+          const isPasswordField = elementLower.includes('password') || elementLower.includes('passwd');
+          const looksLikeEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+          // Relaxed password detection: 4+ chars that look like real credentials (not test filler like 'aaa')
+          const looksLikePassword = value.length >= 4 && !value.match(/^(.)\1+$/) && (
+            (/[A-Z]/.test(value) && /[a-z]/.test(value) && /[0-9!@#$%^&*]/.test(value)) ||
+            (isPasswordField)
+          );
+
+          if (isEmailField || isPasswordField || looksLikeEmail || looksLikePassword) {
+            // In negative scenarios, skip masking if the value is intentionally wrong
+            // (e.g., 'invaliduser', SQL injection, empty strings, 'xxx', clearly fake values)
+            if (inNegativeScenario) {
+              const isIntentionallyWrong =
+                value === '' ||
+                value.length <= 2 ||
+                value.match(/^(invalid|wrong|fake|bad|test|xxx|aaa)/i) ||
+                value.includes("'") || value.includes('"') || // SQL injection
+                value.includes('OR') || value.includes('--') ||
+                value.match(/^(.)\1{3,}$/) || // repeated chars like 'aaaa'
+                value.match(/^[a-z]{10,}$/); // long random lowercase (filler)
+              if (isIntentionallyWrong) return match;
+            }
+
+            let secretKey: string;
+            if (elementLower.includes('username') || elementLower.includes('user')) {
+              secretKey = 'username';
+            } else if (isEmailField || looksLikeEmail) {
+              secretKey = 'email';
+            } else if (isPasswordField || looksLikePassword) {
+              secretKey = 'password';
+            } else {
+              secretIndex++;
+              secretKey = `secret_${secretIndex}`;
+            }
+
+            secrets[secretKey] = value;
+            return `${prefix}$$${secretKey}${mid}${elementRef}${suffix}`;
+          }
+          return match;
+        }
+      );
+      processedLines.push(masked);
+    } else {
+      processedLines.push(line);
+    }
+  }
+
+  // Save secrets to runtime-store.json if any were detected
+  if (Object.keys(secrets).length > 0) {
+    const storePath = path.resolve(process.cwd(), 'testdata', 'runtime-store.json');
+    let existing: Record<string, unknown> = {};
+    if (fs.existsSync(storePath)) {
+      try { existing = JSON.parse(fs.readFileSync(storePath, 'utf-8')); } catch { /* empty */ }
+    } else {
+      const dir = path.dirname(storePath);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    }
+
+    Object.entries(secrets).forEach(([key, value]) => {
+      existing[key] = value;
+    });
+
+    fs.writeFileSync(storePath, JSON.stringify(existing, null, 2), 'utf-8');
+    console.log(`[GeneratorAgent] Credentials masked in feature file → ${Object.keys(secrets).length} secret(s) saved to testdata/runtime-store.json`);
+    Object.keys(secrets).forEach((k) => console.log(`    $$${k} = *****`));
+  }
+
+  return processedLines.join('\n');
 }
 
 // ─── Entry Point ──────────────────────────────────────────────────────────────

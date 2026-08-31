@@ -121,6 +121,42 @@ function derivePage(storyFile?: string, testcasesFile?: string, url?: string, ex
 }
 
 /**
+ * Parses JSON leniently from an LLM response. Handles the common ways models
+ * (especially reasoning/o-series) wrap or pad JSON:
+ *   • ```json ... ``` or ``` ... ``` code fences
+ *   • prose before/after the JSON
+ *   • a JSON array OR object
+ * Strategy: strip fences, try direct parse, else extract the outermost [...] or
+ * {...} substring and parse that. Throws if nothing parseable is found.
+ */
+function _parseLenientJson(raw: string): any {
+  if (raw == null) throw new Error('empty response');
+  let s = String(raw).trim();
+
+  // Remove ```json / ``` fences.
+  s = s.replace(/```(?:json)?\s*/gi, '').replace(/```/g, '').trim();
+
+  // Fast path.
+  try { return JSON.parse(s); } catch { /* fall through */ }
+
+  // Extract the outermost array first (the supplementary prompt asks for an array),
+  // then fall back to the outermost object.
+  const arrStart = s.indexOf('[');
+  const arrEnd = s.lastIndexOf(']');
+  if (arrStart !== -1 && arrEnd > arrStart) {
+    const candidate = s.slice(arrStart, arrEnd + 1);
+    try { return JSON.parse(candidate); } catch { /* fall through */ }
+  }
+  const objStart = s.indexOf('{');
+  const objEnd = s.lastIndexOf('}');
+  if (objStart !== -1 && objEnd > objStart) {
+    const candidate = s.slice(objStart, objEnd + 1);
+    try { return JSON.parse(candidate); } catch { /* fall through */ }
+  }
+  throw new Error('no parseable JSON found');
+}
+
+/**
  * Resolves a KNOWN framework page name using signals from the story content and
  * URL, matched against:
  *   • existing .properties page names (the curated registry), and
@@ -141,8 +177,11 @@ function _resolveKnownPage(storyFile?: string, url?: string): string {
     // (0) Highest confidence: the story explicitly declares its page/module via a
     //     "Page Name:" / "Page:" (non-URL) metadata line. This is the reliable,
     //     no-guess signal — author states it once and it always wins.
-    const declaredMatch = hay.match(/(?:^|\n)\s*\*{0,2}page\s*name\*{0,2}\s*:\s*([a-z0-9_-]+)/i)
-      || hay.match(/(?:^|\n)\s*\*{0,2}page\*{0,2}\s*:\s*([a-z][a-z0-9_-]{2,})\s*(?:\n|$)/i);
+    // Match "Page Name: X" tolerating markdown bold in ANY position, e.g.
+    //   **Page Name:** X   |   **Page Name**: X   |   Page Name: X
+    // The `[:*\s]*` after the label absorbs the colon and/or bold markers.
+    const declaredMatch = hay.match(/(?:^|\n)[*\s]*page\s*name[:*\s]+([a-z0-9_-]+)/i)
+      || hay.match(/(?:^|\n)[*\s]*page[:*\s]+([a-z][a-z0-9_-]{2,})\s*(?:\n|$)/i);
     if (declaredMatch && declaredMatch[1] && !/^https?/i.test(declaredMatch[1])) {
       // Normalize to the registry's casing if it exists, else use as-declared (PascalCase).
       const declared = declaredMatch[1].trim();
@@ -656,11 +695,14 @@ async function runSinglePlan(args: SinglePlanArgs): Promise<{ mdPath: string; js
             let additionalCases: any[] = [];
 
             try {
-              // AI may return a JSON array or an object with testCases array
-              const aiResult = JSON.parse(supplementaryResponse);
-              additionalCases = Array.isArray(aiResult) ? aiResult : (aiResult.testCases || []);
+              // Models (esp. reasoning/o-series like gpt-5.6-luna) often wrap JSON
+              // in ```json fences or add prose before/after. Sanitize first, then
+              // parse. Extract the outermost JSON array or object if needed.
+              const aiResult = _parseLenientJson(supplementaryResponse);
+              additionalCases = Array.isArray(aiResult) ? aiResult : (aiResult?.testCases || []);
             } catch {
               console.warn(`[PlannerAgent] Could not parse supplementary AI response — skipping`);
+              console.warn(`[PlannerAgent] Raw response (first 300 chars): ${String(supplementaryResponse).slice(0, 300)}`);
             }
 
             if (additionalCases.length > 0) {
